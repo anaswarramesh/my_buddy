@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "CoachPilot AI",
+    "slug": "coach-pilot",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#020617"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "CoachPilot requires microphone access to capture voice thoughts and idea notes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#020617"
+      },
+      "permissions": [
+        "RECORD_AUDIO"
+      ]
+    }
+  }
+}

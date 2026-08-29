@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoachPilot AI — Daily Productivity & Coaching Assistant</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .glass-card { background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); }
+        .pulse-ring { animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 16px rgba(59, 130, 246, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased flex flex-col">
+    <!-- Navigation Bar -->
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                    <i data-lucide="sparkles" class="w-5 h-5 text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-white tracking-tight">CoachPilot <span class="text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full border border-indigo-500/30">AI Architect</span></h1>
+                    <p class="text-xs text-slate-400">Intelligent Daily Assistant & Executive Coach</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span class="text-slate-300">Bi-directional Sync: Google & CalDAV Active</span>
+                </div>
+                <button onclick="seedDemoData()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 flex items-center space-x-1.5 transition">
+                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                    <span>Reset Demo Calendar</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full space-y-6">
+        
+        <!-- Top Row: Morning Synthesis & Cognitive Density Overview -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Daily Synthesis Banner -->
+            <div class="lg:col-span-2 glass-card rounded-2xl p-6 relative overflow-hidden flex flex-col justify-between">
+                <div class="absolute top-0 right-0 w-80 h-80 bg-gradient-to-bl from-blue-500/10 via-indigo-500/5 to-transparent rounded-full pointer-events-none"></div>
+                
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-semibold tracking-wider uppercase text-indigo-400 flex items-center space-x-1.5">
+                            <i data-lucide="sun" class="w-4 h-4"></i>
+                            <span>Daily Morning Synthesis</span>
+                        </span>
+                        <span id="currentDateLabel" class="text-xs text-slate-400">Today</span>
+                    </div>
+
+                    <div id="coachingNudgeBox" class="p-4 rounded-xl bg-slate-900/90 border border-slate-700/60 mb-4">
+                        <div class="flex items-start space-x-3">
+                            <div class="p-2 rounded-lg bg-indigo-500/20 text-indigo-400 mt-0.5">
+                                <i data-lucide="brain-circuit" class="w-5 h-5"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-semibold text-white mb-1">Executive Coach Nudge</h4>
+                                <p id="coachingNudgeText" class="text-xs text-slate-300 leading-relaxed">
+                                    Loading your daily cognitive synthesis...
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Schedule Summary Stats -->
+                <div class="grid grid-cols-3 gap-4 pt-4 border-t border-slate-800">
+                    <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                        <p class="text-[11px] text-slate-400 font-medium">Scheduled Appointments</p>
+                        <p id="todayMeetingCount" class="text-xl font-bold text-white mt-1">--</p>
+                    </div>
+                    <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                        <p class="text-[11px] text-slate-400 font-medium">Committed Focus Time</p>
+                        <p id="todayCommittedMins" class="text-xl font-bold text-white mt-1">-- hrs</p>
+                    </div>
+                    <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+                        <p class="text-[11px] text-slate-400 font-medium">Available Green Slots</p>
+                        <p id="todayFocusSlotsCount" class="text-xl font-bold text-emerald-400 mt-1">-- slots</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cognitive Density Meter -->
+            <div class="glass-card rounded-2xl p-6 flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-semibold tracking-wider uppercase text-slate-400 flex items-center space-x-1.5">
+                        <i data-lucide="gauge" class="w-4 h-4"></i>
+                        <span>Today's Density Score</span>
+                    </span>
+                    <span id="densityTierBadge" class="text-xs px-2.5 py-0.5 rounded-full font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Light
+                    </span>
+                </div>
+
+                <div class="my-auto py-4 text-center">
+                    <div class="relative inline-flex items-center justify-center">
+                        <svg class="w-36 h-36 transform -rotate-90">
+                            <circle cx="72" cy="72" r="56" stroke="currentColor" stroke-width="12" class="text-slate-800 fill-none" />
+                            <circle id="densityCircle" cx="72" cy="72" r="56" stroke="currentColor" stroke-width="12" stroke-dasharray="351.85" stroke-dashoffset="351.85" stroke-linecap="round" class="text-emerald-400 fill-none transition-all duration-1000 ease-out" />
+                        </svg>
+                        <div class="absolute text-center">
+                            <span id="densityScoreNumber" class="text-3xl font-extrabold text-white">0%</span>
+                            <span class="block text-[10px] text-slate-400 tracking-wider uppercase">Load</span>
+                        </div>
+                    </div>
+                    <p id="densityRecommendation" class="text-xs text-slate-400 mt-3 px-2">
+                        Optimal cognitive capacity for deep work and launching ideas.
+                    </p>
+                </div>
+
+                <div class="text-[11px] text-slate-500 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 text-center">
+                    Includes 15m context-switching penalty per meeting
+                </div>
+            </div>
+        </div>
+
+        <!-- 7-Day Rolling Density Map -->
+        <div class="glass-card rounded-2xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-2">
+                    <i data-lucide="calendar" class="w-4 h-4 text-indigo-400"></i>
+                    <h3 class="text-sm font-semibold text-white">7-Day Cognitive Density Forecast & Green Windows</h3>
+                </div>
+                <div class="flex items-center space-x-3 text-xs">
+                    <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span><span class="text-slate-400">Green (<45%)</span></span>
+                    <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span><span class="text-slate-400">Moderate</span></span>
+                    <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-400"></span><span class="text-slate-400">Heavy</span></span>
+                </div>
+            </div>
+            <div id="densityForecastGrid" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                <!-- Forecast Cards Rendered Here -->
+            </div>
+        </div>
+
+        <!-- Middle Row: Voice Capture & Idea Feasibility Inspector -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- Voice Capture & Prompt A Ingestion -->
+            <div class="glass-card rounded-2xl p-6 space-y-4 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-semibold tracking-wider uppercase text-blue-400 flex items-center space-x-1.5">
+                            <i data-lucide="mic" class="w-4 h-4"></i>
+                            <span>Frictionless Voice Capture & Triage</span>
+                        </span>
+                        <span class="text-[11px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30">Whisper + Prompt A</span>
+                    </div>
+                    <p class="text-xs text-slate-400">
+                        Press to record raw thoughts, business ideas, or scheduling commands. The AI separates immediate tasks from big ideas and evaluates feasibility.
+                    </p>
+                </div>
+
+                <!-- Voice Recording Widget -->
+                <div class="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col items-center justify-center space-y-4">
+                    <button id="voiceRecordBtn" onclick="toggleVoiceRecord()" class="w-20 h-20 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-xl shadow-blue-500/30 transition-all duration-300 focus:outline-none">
+                        <i data-lucide="mic" class="w-8 h-8"></i>
+                    </button>
+                    <div class="text-center">
+                        <p id="voiceStatusText" class="text-xs font-semibold text-slate-200">Tap to speak a thought or idea</p>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Or test with quick presets below</p>
+                    </div>
+                </div>
+
+                <!-- Quick Preset Prompts -->
+                <div class="space-y-2">
+                    <p class="text-[11px] text-slate-400 font-medium">Quick Test Thoughts:</p>
+                    <div class="grid grid-cols-1 gap-2">
+                        <button onclick="injectThought('I want to build an automated AI client intake system for law firms that summarizes case notes before consultation calls.')" class="text-left text-xs bg-slate-900 hover:bg-slate-800 p-2.5 rounded-xl border border-slate-800 text-slate-300 transition flex items-center justify-between">
+                            <span class="truncate">💡 "I want to build an automated AI intake system for law firms..."</span>
+                            <span class="text-[10px] text-indigo-400 shrink-0 ml-2">Big Idea</span>
+                        </button>
+                        <button onclick="injectThought('Clear my Thursday afternoon and float those tasks to next week.')" class="text-left text-xs bg-slate-900 hover:bg-slate-800 p-2.5 rounded-xl border border-slate-800 text-slate-300 transition flex items-center justify-between">
+                            <span class="truncate">📅 "Clear my Thursday afternoon and float those tasks to next week."</span>
+                            <span class="text-[10px] text-amber-400 shrink-0 ml-2">NLP Reschedule</span>
+                        </button>
+                        <button onclick="injectThought('Email Sarah the revised financial forecast deck by 3 PM today.')" class="text-left text-xs bg-slate-900 hover:bg-slate-800 p-2.5 rounded-xl border border-slate-800 text-slate-300 transition flex items-center justify-between">
+                            <span class="truncate">⚡ "Email Sarah the revised financial forecast deck by 3 PM..."</span>
+                            <span class="text-[10px] text-emerald-400 shrink-0 ml-2">Task</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Custom Voice / Text Box -->
+                <div class="flex space-x-2 pt-2">
+                    <input id="customThoughtInput" type="text" placeholder="Type or paste any unfiltered thought..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                    <button onclick="submitCustomThought()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition">
+                        Process
+                    </button>
+                </div>
+            </div>
+
+            <!-- Idea Feasibility & Starter Step Inspector -->
+            <div class="glass-card rounded-2xl p-6 flex flex-col justify-between space-y-4">
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-semibold tracking-wider uppercase text-emerald-400 flex items-center space-x-1.5">
+                            <i data-lucide="target" class="w-4 h-4"></i>
+                            <span>Idea Feasibility & Coaching Engine</span>
+                        </span>
+                        <span id="ideaStatusBadge" class="text-[11px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">Awaiting Input</span>
+                    </div>
+                    <h3 id="activeIdeaTitle" class="text-base font-bold text-white">No Idea Selected</h3>
+                    <p id="activeIdeaSummary" class="text-xs text-slate-400 mt-1 leading-relaxed">
+                        Capture a big idea to see feasibility scores, obstacle diagnosis, and low-friction starter actions.
+                    </p>
+                </div>
+
+                <!-- Score Gauges -->
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800 text-center">
+                        <p class="text-[10px] text-slate-400 uppercase font-medium">Feasibility</p>
+                        <p id="scoreFeasibility" class="text-xl font-bold text-emerald-400 mt-0.5">--</p>
+                    </div>
+                    <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800 text-center">
+                        <p class="text-[10px] text-slate-400 uppercase font-medium">Impact Potential</p>
+                        <p id="scoreImpact" class="text-xl font-bold text-indigo-400 mt-0.5">--</p>
+                    </div>
+                    <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800 text-center">
+                        <p class="text-[10px] text-slate-400 uppercase font-medium">Friction Barrier</p>
+                        <p id="scoreFriction" class="text-xl font-bold text-amber-400 mt-0.5">--</p>
+                    </div>
+                </div>
+
+                <!-- Coaching Breakdown Box -->
+                <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+                    <div>
+                        <span class="text-[10px] font-bold uppercase text-slate-400">Coaching Verdict</span>
+                        <p id="coachingVerdictText" class="text-xs text-slate-300 mt-0.5">--</p>
+                    </div>
+                    <div class="pt-2 border-t border-slate-800/60">
+                        <span class="text-[10px] font-bold uppercase text-amber-400">Immediate Obstacle & Antidote</span>
+                        <p id="obstacleText" class="text-xs text-slate-300 mt-0.5">--</p>
+                    </div>
+                </div>
+
+                <!-- Step 1 Micro-Ignition Task Highlight -->
+                <div id="starterTaskCard" class="p-4 rounded-xl bg-gradient-to-r from-indigo-950/80 to-slate-900 border border-indigo-500/40 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-bold text-indigo-400 flex items-center space-x-1.5">
+                            <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+                            <span>Step 1: Micro-Ignition Action (≤15m)</span>
+                        </span>
+                        <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">Zero Setup</span>
+                    </div>
+                    <p id="starterTaskTitle" class="text-xs font-semibold text-white">Draft 3 core value propositions (10 mins)</p>
+                    <div class="flex items-center justify-between pt-1">
+                        <span id="starterTaskScheduleStatus" class="text-[11px] text-slate-400">Not yet scheduled</span>
+                        <button id="autoScheduleBtn" onclick="autoScheduleCurrentTask()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1">
+                            <i data-lucide="calendar-plus" class="w-3.5 h-3.5"></i>
+                            <span>Auto-Schedule into Green Slot</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Row: Dynamic NLP Command Bar & Live Calendar Timeline -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- NLP Dynamic Rescheduling Command Center -->
+            <div class="glass-card rounded-2xl p-6 space-y-4 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center space-x-2 mb-2">
+                        <i data-lucide="command" class="w-4 h-4 text-amber-400"></i>
+                        <h3 class="text-sm font-semibold text-white">Dynamic NLP Rescheduling</h3>
+                    </div>
+                    <p class="text-xs text-slate-400">
+                        Shift, float, or clear calendar blocks using conversational commands.
+                    </p>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="space-y-1.5">
+                        <input id="nlpCommandInput" type="text" placeholder="e.g. Clear Thursday afternoon and float tasks..." class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
+                        <button onclick="executeNLPCommand()" class="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-1.5">
+                            <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
+                            <span>Execute Dynamic Reschedule</span>
+                        </button>
+                    </div>
+
+                    <div id="nlpResultBox" class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 space-y-2 hidden">
+                        <p id="nlpSummaryText" class="font-medium text-white"></p>
+                        <div id="nlpMutationsList" class="space-y-1 text-[11px] text-slate-400"></div>
+                        <p id="nlpDensityImpact" class="text-[11px] text-emerald-400 font-medium"></p>
+                    </div>
+                </div>
+
+                <div class="text-[11px] text-slate-500 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                    Calculates density shifts & preserves focus blocks automatically.
+                </div>
+            </div>
+
+            <!-- Live Calendar Agenda & Auto-Placed Tasks -->
+            <div class="lg:col-span-2 glass-card rounded-2xl p-6 flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-2">
+                        <i data-lucide="clock" class="w-4 h-4 text-indigo-400"></i>
+                        <h3 class="text-sm font-semibold text-white">Today's Agenda & Auto-Scheduled Slots</h3>
+                    </div>
+                    <span class="text-xs text-slate-400">9:00 AM – 6:00 PM Work Window</span>
+                </div>
+
+                <div id="calendarEventsTimeline" class="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                    <!-- Events Rendered Here -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- App Logic Script -->
+    <script>
+        let currentActiveTask = null;
+        let currentActiveIdea = null;
+
+        // Initialize dashboard on load
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            fetchDailySynthesis();
+            fetchDensityForecast();
+            fetchIdeas();
+        });
+
+        async function fetchDailySynthesis() {
+            try {
+                const res = await fetch('/api/synthesis/daily');
+                const data = await res.json();
+
+                // Format current date
+                const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+                document.getElementById('currentDateLabel').innerText = todayStr;
+
+                // Nudge Text
+                document.getElementById('coachingNudgeText').innerText = data.coaching_nudge;
+
+                // Stats
+                document.getElementById('todayMeetingCount').innerText = data.density.meeting_count;
+                const hours = (data.density.committed_minutes / 60).toFixed(1);
+                document.getElementById('todayCommittedMins').innerText = `${hours} hrs`;
+                document.getElementById('todayFocusSlotsCount').innerText = `${data.density.available_focus_windows.length} slots`;
+
+                // Density Gauge
+                const scorePercent = Math.round(data.density.score * 100);
+                document.getElementById('densityScoreNumber').innerText = `${scorePercent}%`;
+                
+                const circle = document.getElementById('densityCircle');
+                const circumference = 351.85;
+                const offset = circumference - (data.density.score * circumference);
+                circle.style.strokeDashoffset = offset;
+
+                // Tier Badge
+                const tierBadge = document.getElementById('densityTierBadge');
+                tierBadge.innerText = data.density.level.toUpperCase();
+                if (data.density.level === 'light') {
+                    tierBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+                    circle.className = 'text-emerald-400 fill-none transition-all duration-1000 ease-out';
+                } else if (data.density.level === 'moderate') {
+                    tierBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30';
+                    circle.className = 'text-amber-400 fill-none transition-all duration-1000 ease-out';
+                } else {
+                    tierBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-medium bg-rose-500/20 text-rose-300 border border-rose-500/30';
+                    circle.className = 'text-rose-400 fill-none transition-all duration-1000 ease-out';
+                }
+
+                // Render Timeline Events
+                renderTimeline(data.today_events);
+                
+            } catch (err) {
+                console.error("Failed to load daily synthesis:", err);
+            }
+        }
+
+        async function fetchDensityForecast() {
+            try {
+                const res = await fetch('/api/calendar/density?days=7');
+                const data = await res.json();
+                const container = document.getElementById('densityForecastGrid');
+                container.innerHTML = '';
+
+                data.snapshots.forEach((snap, i) => {
+                    const d = new Date(snap.date + 'T00:00:00');
+                    const dayName = i === 0 ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' });
+                    const dateNum = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+                    const scorePct = Math.round(snap.density_score * 100);
+
+                    let colorClass = 'border-emerald-500/40 bg-emerald-950/20 text-emerald-300';
+                    let dotColor = 'bg-emerald-400';
+                    if (snap.density_level === 'moderate') {
+                        colorClass = 'border-amber-500/40 bg-amber-950/20 text-amber-300';
+                        dotColor = 'bg-amber-400';
+                    } else if (snap.density_level === 'dense' || snap.density_level === 'overloaded') {
+                        colorClass = 'border-rose-500/40 bg-rose-950/20 text-rose-300';
+                        dotColor = 'bg-rose-400';
+                    }
+
+                    const card = document.createElement('div');
+                    card.className = `p-3 rounded-xl border ${colorClass} flex flex-col justify-between`;
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="text-xs font-bold text-white">${dayName}</span>
+                            <span class="w-2 h-2 rounded-full ${dotColor}"></span>
+                        </div>
+                        <span class="text-[10px] text-slate-400">${dateNum}</span>
+                        <div class="mt-2">
+                            <span class="text-base font-extrabold text-white">${scorePct}%</span>
+                            <span class="block text-[10px] text-slate-400">${snap.available_focus_windows.length} focus slots</span>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            } catch (err) {
+                console.error("Failed to load forecast:", err);
+            }
+        }
+
+        async function fetchIdeas() {
+            try {
+                const res = await fetch('/api/ideas');
+                const ideas = await res.json();
+                if (ideas.length > 0) {
+                    displayIdea(ideas[0]);
+                }
+            } catch (err) {
+                console.error("Failed to load ideas:", err);
+            }
+        }
+
+        function displayIdea(idea) {
+            currentActiveIdea = idea;
+            document.getElementById('activeIdeaTitle').innerText = idea.title;
+            document.getElementById('activeIdeaSummary').innerText = idea.summary || idea.raw_transcript;
+            document.getElementById('ideaStatusBadge').innerText = idea.category.toUpperCase();
+            document.getElementById('scoreFeasibility').innerText = `${idea.feasibility_score}%`;
+            document.getElementById('scoreImpact').innerText = `${idea.impact_score}%`;
+            document.getElementById('scoreFriction').innerText = `${idea.friction_score}%`;
+            document.getElementById('coachingVerdictText').innerText = idea.coaching_verdict || "High commercial demand. Focus on rapid low-friction testing.";
+            document.getElementById('obstacleText').innerText = idea.primary_obstacle || "Initial procrastination on technical setup.";
+
+            // Load starter tasks for this idea
+            fetch(`/api/ideas/${idea.id}/tasks`)
+                .then(r => r.json())
+                .then(tasks => {
+                    const starter = tasks.find(t => t.is_starter_step) || tasks[0];
+                    if (starter) {
+                        currentActiveTask = starter;
+                        document.getElementById('starterTaskTitle').innerText = starter.title;
+                        const statusLabel = document.getElementById('starterTaskScheduleStatus');
+                        const scheduleBtn = document.getElementById('autoScheduleBtn');
+                        if (starter.is_scheduled) {
+                            statusLabel.innerText = `Scheduled: ${new Date(starter.scheduled_start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                            statusLabel.className = "text-[11px] text-emerald-400 font-semibold";
+                            scheduleBtn.classList.add('hidden');
+                        } else {
+                            statusLabel.innerText = "Ready to schedule in lowest-density slot";
+                            statusLabel.className = "text-[11px] text-slate-400";
+                            scheduleBtn.classList.remove('hidden');
+                        }
+                    }
+                });
+        }
+
+        function renderTimeline(events) {
+            const container = document.getElementById('calendarEventsTimeline');
+            container.innerHTML = '';
+
+            if (events.length === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-500 py-4 text-center">No appointments today. 100% open focus time.</p>';
+                return;
+            }
+
+            events.forEach(ev => {
+                const s = new Date(ev.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const e = new Date(ev.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const isTask = ev.event_category === 'ai_starter_task';
+
+                const item = document.createElement('div');
+                item.className = `p-3 rounded-xl border ${isTask ? 'bg-indigo-950/40 border-indigo-500/50' : 'bg-slate-900/90 border-slate-800'} flex items-center justify-between`;
+                item.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xs font-mono text-slate-400 font-medium">${s} - ${e}</span>
+                        <div>
+                            <p class="text-xs font-semibold ${isTask ? 'text-indigo-300' : 'text-white'}">${ev.title}</p>
+                            <p class="text-[10px] text-slate-400">${isTask ? '⚡ AI Ignition Block' : 'Committed Appointment'}</p>
+                        </div>
+                    </div>
+                    <span class="text-[10px] px-2 py-0.5 rounded ${isTask ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800 text-slate-400'}">
+                        ${ev.cognitive_weight > 1.2 ? 'High Cognitive Load' : 'Standard'}
+                    </span>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        let isRecording = false;
+        function toggleVoiceRecord() {
+            const btn = document.getElementById('voiceRecordBtn');
+            const status = document.getElementById('voiceStatusText');
+            
+            if (!isRecording) {
+                isRecording = true;
+                btn.classList.add('pulse-ring', 'bg-rose-600', 'hover:bg-rose-500');
+                btn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
+                status.innerText = "Listening... Speak your idea or task";
+                status.className = "text-xs font-semibold text-rose-400 animate-pulse";
+            } else {
+                isRecording = false;
+                btn.classList.remove('pulse-ring', 'bg-rose-600', 'hover:bg-rose-500');
+                btn.classList.add('bg-blue-600', 'hover:bg-blue-500');
+                status.innerText = "Transcribing with Whisper & running Prompt A...";
+                status.className = "text-xs font-semibold text-blue-400";
+                
+                // Simulate transcribed voice output
+                setTimeout(() => {
+                    injectThought("I want to launch an AI agent that monitors legal documents and drafts daily summary briefs for lawyers.");
+                    status.innerText = "Tap to speak a thought or idea";
+                    status.className = "text-xs font-semibold text-slate-200";
+                }, 1200);
+            }
+        }
+
+        async function injectThought(text) {
+            document.getElementById('customThoughtInput').value = text;
+            await submitCustomThought();
+        }
+
+        async function submitCustomThought() {
+            const input = document.getElementById('customThoughtInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            try {
+                const res = await fetch('/api/voice/process-thought', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ transcript: text, user_id: 'default-user' })
+                });
+                const result = await res.json();
+                
+                if (result.classification === 'BIG_IDEA') {
+                    await fetchIdeas();
+                }
+                
+                await fetchDailySynthesis();
+                await fetchDensityForecast();
+                input.value = '';
+                
+            } catch (err) {
+                console.error("Error processing thought:", err);
+            }
+        }
+
+        async function autoScheduleCurrentTask() {
+            if (!currentActiveTask) return;
+            const btn = document.getElementById('autoScheduleBtn');
+            btn.innerText = "Finding Green Slot...";
+            
+            try {
+                const res = await fetch(`/api/tasks/${currentActiveTask.id}/auto-schedule`, {
+                    method: 'POST'
+                });
+                const updated = await res.json();
+                
+                await fetchDailySynthesis();
+                await fetchDensityForecast();
+                if (currentActiveIdea) displayIdea(currentActiveIdea);
+            } catch (err) {
+                alert("Scheduling error: " + err.message);
+                btn.innerText = "Auto-Schedule into Green Slot";
+            }
+        }
+
+        async function executeNLPCommand() {
+            const input = document.getElementById('nlpCommandInput');
+            const cmd = input.value.trim();
+            if (!cmd) return;
+
+            try {
+                const res = await fetch('/api/nlp/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: cmd, user_id: 'default-user' })
+                });
+                const data = await res.json();
+
+                const box = document.getElementById('nlpResultBox');
+                box.classList.remove('hidden');
+                document.getElementById('nlpSummaryText').innerText = data.summary_of_changes;
+                document.getElementById('nlpDensityImpact').innerText = data.density_impact_summary || "";
+
+                const mutationsList = document.getElementById('nlpMutationsList');
+                mutationsList.innerHTML = '';
+                data.mutations.forEach(m => {
+                    const p = document.createElement('p');
+                    p.innerText = `• ${m.item_title}: ${m.reason}`;
+                    mutationsList.appendChild(p);
+                });
+
+                await fetchDailySynthesis();
+                await fetchDensityForecast();
+                input.value = '';
+
+            } catch (err) {
+                console.error("NLP execution error:", err);
+            }
+        }
+
+        async function seedDemoData() {
+            try {
+                await fetch('/api/calendar/seed-demo', { method: 'POST' });
+                await fetchDailySynthesis();
+                await fetchDensityForecast();
+                await fetchIdeas();
+            } catch (err) {
+                console.error("Reset error:", err);
+            }
+        }
+    </script>
+</body>
+</html>
