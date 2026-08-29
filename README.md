@@ -1,10 +1,10 @@
 # CoachPilot AI (My Buddy) — ESP32 Physical AI Desk Companion & Productivity Engine
 
-**CoachPilot AI** is a physical hardware desk assistant powered by the **ESP32** microcontroller, an **I2S digital microphone**, and an **OLED display**. It syncs bi-directionally with your Google and Apple calendars, captures unfiltered voice notes, evaluates the feasibility of your big ideas, generates frictionless $\le 15$-minute micro-ignition tasks, and automatically schedules them into low-density calendar slots.
+**CoachPilot AI** is a physical hardware desk assistant powered by the **ESP32** microcontroller, an **INMP441 I2S digital microphone**, and an **SSD1306 OLED display**. It syncs bi-directionally with your Google and Apple calendars, captures unfiltered voice notes, evaluates the feasibility of big ideas, generates frictionless $\le 15$-minute micro-ignition tasks, and automatically schedules them into low-density calendar slots.
 
 ---
 
-## 🌟 How the ESP32 Desk Companion Works
+## 🌟 End-to-End System Architecture
 
 ```
  ┌─────────────────────────────────────────────────────────┐
@@ -35,18 +35,92 @@
  └─────────────────────────────────────────────────────────┘
 ```
 
-1. **Daily Morning Synthesis on OLED**: At your desk, the OLED display shows today's date, your **Cognitive Schedule Density %**, upcoming meetings count, the highest-priority **Step 1 Micro-Ignition Task**, and an AI executive coaching nudge.
-2. **Push-to-Talk Voice Capture**: Hold down the physical button to speak an idea, errand, or calendar command. The ESP32 records high-definition 16kHz audio using the INMP441 I2S microphone with a live VU-meter animation on the OLED screen.
-3. **Idea Feasibility & Coaching Engine**: Releasing the button sends the audio directly to the cloud backend. Whisper transcribes the voice, Prompt A evaluates venture feasibility (1-100), and Prompt B breaks it down into a 15-minute starter action.
-4. **Smart Density Auto-Placement**: The system calculates schedule density across the upcoming 7 days and automatically books your starter task into an open **Green Focus Day** without overloading your schedule.
+---
+
+## 🔄 Complete End-to-End Workflow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant ESP32 as ESP32 Desk Device
+    participant Backend as FastAPI Cloud Gateway
+    participant LLM as LLM Intelligence (Whisper + Prompts)
+    participant DB as Database / Calendar Sync
+
+    Note over User,ESP32: 1. Morning Routine & Idle Display
+    ESP32->>Backend: GET /api/hardware/display-data
+    Backend->>DB: Fetch today's events & calculate density D(d)
+    Backend-->>ESP32: JSON (Density: 35%, Mtgs: 2, Step 1 Task, Coaching Nudge)
+    ESP32->>ESP32: Render 128x64 Dashboard on OLED
+
+    Note over User,ESP32: 2. Push-to-Talk Voice Capture
+    User->>ESP32: Hold Push-Button & Speak Idea / Task
+    ESP32->>ESP32: INMP441 records 16kHz PCM via I2S DMA (VU-meter animates)
+    User->>ESP32: Release Button
+    ESP32->>Backend: POST /api/hardware/voice-upload (Binary WAV Audio)
+
+    Note over Backend,LLM: 3. AI Triage, Feasibility Coaching & Auto-Placement
+    Backend->>LLM: Whisper STT -> Prompt A (Input Classification & Feasibility)
+    alt Classification == BIG_IDEA
+        LLM-->>Backend: Feasibility (88%), Impact (92%), Friction (40%), Verdict & Obstacle
+        Backend->>LLM: Prompt B (Decompose into <=15m Micro-Ignition Action)
+        LLM-->>Backend: Step 1 Action: "Draft 3 value propositions (10 mins)"
+        Backend->>Backend: Scheduler: Find upcoming Green Day (D < 0.45) & slot task
+        Backend->>DB: Write Task + Create Synced Calendar Event block
+    else Classification == IMMEDIATE_TASK
+        LLM-->>Backend: Immediate Task logged
+    else Classification == CALENDAR_COMMAND
+        Backend->>LLM: Prompt C (NLP Reschedule: "Clear Thursday afternoon...")
+        LLM-->>Backend: Move conflicted tasks to low-density days
+    end
+
+    Backend-->>ESP32: Status (IDEA: 88% Feasible, Step 1 Title, Scheduled Time)
+    ESP32->>ESP32: Display Confirmation Screen for 3.5s -> Return to Dashboard
+```
+
+### The 5 Core Product Steps in Detail
+
+1. **Morning Cognitive Synthesis**: When idle on your desk, the OLED display continuously shows your daily cognitive load score ($D \in [0, 100\%]$), your scheduled meeting count, your highest-priority **Step 1 Ignition Task**, and an executive coaching ticker.
+2. **Frictionless Voice Capture**: Press and hold the physical button to record any unfiltered thought. The ESP32 captures uncompressed 16 kHz 16-bit mono audio with live waveform VU animations.
+3. **Idea Feasibility & Reality Check (Prompt A)**: The cloud backend feeds audio to Whisper and Prompt A. For big ideas, it scores venture feasibility (1-100), impact potential, and identifies the core emotional or technical friction causing procrastination.
+4. **Behavioral Step Decomposition (Prompt B)**: Ambitious ideas are broken down into 3–5 progressive steps, strictly enforcing that **Step 1 is a $\le 15$-minute Micro-Ignition Action** (zero setup friction to eliminate task paralysis).
+5. **Cognitive Schedule Density Engine & Auto-Placement (Prompt C)**: The system analyzes your calendar load over the next 7 days and automatically books your micro starter task into an open focus window on the earliest **Green Focus Day** ($D < 0.45$), syncing directly to your Google and Apple Calendars.
+
+---
+
+## 📐 Schedule Density Mathematical Model
+
+For any given date $d$, the **Schedule Density Score** $D(d)$ is calculated as:
+
+$$D(d) = \min\left(1.0, \frac{\sum_{i=1}^{N} (T_{i} \times W_{i}) + (N \times C_{\text{switch}})}{T_{\text{work\_window}}}\right)$$
+
+### Parameters & Cognitive Weights:
+- $T_i$: Duration of calendar event $i$ in minutes.
+- $W_i$: Cognitive fatigue weight:
+  - High-stakes client meetings / Architecture reviews: **$1.5\times$**
+  - Standard team syncs / 1-on-1s: **$1.0\times$**
+  - Light webinars / passive info sessions: **$0.6\times$**
+  - Deep focus blocks: **$1.2\times$**
+- $N$: Total number of distinct scheduled appointments on day $d$.
+- $C_{\text{switch}}$: **15-minute Context-Switching Penalty** added per meeting transition.
+- $T_{\text{work\_window}}$: Total working minutes in the day (**$540\text{ minutes} = 9\text{ hours}$**).
+
+### Schedule Density Tiers:
+| Tier | Score Range | Status | Auto-Scheduling Behavior |
+| :--- | :--- | :--- | :--- |
+| 🟢 **Green (Light)** | $0.00 \le D < 0.45$ | High cognitive bandwidth | **Primary target for Deep Work ($>45$m) & Idea Ignition Steps** |
+| 🟡 **Yellow (Moderate)**| $0.45 \le D < 0.70$ | Balanced schedule | Target for quick 15-minute administrative micro-tasks |
+| 🟠 **Orange (Dense)** | $0.70 \le D < 0.85$ | High fatigue risk | Protected buffers; no new automated tasks scheduled |
+| 🔴 **Red (Overloaded)** | $D \ge 0.85$ | Burnout zone | Proactively prompts user to float non-essential tasks |
 
 ---
 
 ## 🛠️ Hardware Bill of Materials (BOM)
 
-| Component | Part / Spec | Purpose | Est. Cost |
+| Component | Recommended Model | Purpose | Est. Cost |
 | :--- | :--- | :--- | :--- |
-| **Microcontroller** | **ESP32-S3-DevKitC-1** (or ESP32-WROOM-32) | Wi-Fi processing, I2S DMA, OLED rendering | \$3.50 – \$5.00 |
+| **MCU** | **ESP32-S3-DevKitC-1** (or ESP32-WROOM-32) | Dual-core 240MHz, I2S DMA, Wi-Fi networking | \$3.50 – \$5.00 |
 | **Display** | **0.96" or 1.3" I2C OLED (SSD1306)** | 128x64 graphic screen for daily synthesis | \$2.00 – \$3.00 |
 | **Microphone** | **INMP441 I2S Omnidirectional Mic** | 24-bit digital audio capture with high SNR | \$1.20 – \$2.00 |
 | **Button** | **12x12mm Tactile Push Button** | Push-to-Talk actuation switch | \$0.20 |
@@ -82,24 +156,24 @@
    └───────────────────────┴────────────────────────────────┘
 ```
 
-### Pin Connections Table
+### Complete Pin Assignment Table
 
-| Module | Pin | ESP32 Pin | Description |
-| :--- | :--- | :--- | :--- |
-| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V Power |
-| | **GND** | **GND** | Ground |
-| | **SDA** | **GPIO 21** | I2C Data Line |
-| | **SCL** | **GPIO 22** | I2C Clock Line |
-| **INMP441 I2S Mic** | **VDD** | **3V3** | 3.3V Power |
-| | **GND** | **GND** | Ground |
-| | **L/R** | **GND** | Left Channel Select |
-| | **SD** | **GPIO 32** | I2S Serial Data Out |
-| | **WS** | **GPIO 25** | I2S Word Select Clock |
-| | **SCK** | **GPIO 33** | I2S Bit Clock |
-| **Push Button** | **Pin 1** | **GPIO 4** | Configured with `INPUT_PULLUP` |
-| | **Pin 2** | **GND** | Ground (pressing pulls LOW) |
-| **Status LED** | **Anode (+)** | **GPIO 2** | Via 220Ω resistor |
-| | **Cathode (-)**| **GND** | Ground |
+| Module | Pin | ESP32 Pin | Logic Level | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V | Display Power |
+| | **GND** | **GND** | 0V | Ground |
+| | **SDA** | **GPIO 21** | 3.3V | Hardware I2C SDA |
+| | **SCL** | **GPIO 22** | 3.3V | Hardware I2C SCL |
+| **INMP441 I2S Mic** | **VDD** | **3V3** | 3.3V | Digital Mic Power |
+| | **GND** | **GND** | 0V | Ground |
+| | **L/R** | **GND** | 0V | Left Channel Select |
+| | **SD** | **GPIO 32** | 3.3V | I2S Serial Data Out |
+| | **WS** | **GPIO 25** | 3.3V | I2S Word Select / LR Clock |
+| | **SCK** | **GPIO 33** | 3.3V | I2S Bit Clock |
+| **Push-to-Talk Button** | **Pin 1** | **GPIO 4** | Active LOW | Input Pull-up (`INPUT_PULLUP`) |
+| | **Pin 2** | **GND** | 0V | Ground |
+| **Status LED** | **Anode (+)** | **GPIO 2** | 3.3V (220Ω) | HIGH when recording |
+| | **Cathode (-)**| **GND** | 0V | Ground |
 
 ---
 
@@ -139,10 +213,10 @@
 
 ## ☁️ 24/7 Cloud Backend Deployment (No Laptop Needed)
 
-Deploy the backend to **Render.com** (or Fly.io / Railway) for free in 3 minutes so your ESP32 works 24/7 independently:
+Deploy the backend to **Render.com** (or Fly.io / Railway) for free in 3 minutes so your ESP32 companion works 24/7 independently:
 
 1. Log in to [Render.com](https://render.com/) and click **New + $\rightarrow$ Web Service**.
-2. Connect your GitHub repository.
+2. Connect your GitHub repository (`anaswarramesh/my_buddy`).
 3. Configure:
    - **Environment:** `Python`
    - **Build Command:** `pip install -r backend/requirements.txt`
@@ -155,45 +229,31 @@ Deploy the backend to **Render.com** (or Fly.io / Railway) for free in 3 minutes
 
 ---
 
-## 📂 Repository Structure
+## 💬 Conversational NLP Rescheduling Examples
 
+You can speak or type dynamic natural language calendar commands anytime:
+
+- *"Clear my Thursday afternoon and float those tasks to next week."*
+- *"Free up Friday morning for deep focus."*
+- *"Move my 2 PM design review to tomorrow morning."*
+- *"Schedule a 45-minute deep focus block on my next Green Day."*
+
+The backend's **Prompt C** will automatically inspect the 7-day density forecast, calculate conflict-free windows, update tasks, and write the new schedule to Google Calendar.
+
+---
+
+## 📱 Cross-Platform Mobile Client (React Native / Expo)
+
+In addition to your physical ESP32 desk companion, CoachPilot includes a mobile companion app for iOS & Android:
+
+```bash
+cd frontend
+npm install
+npx expo start
 ```
-coach-pilot/
-├── hardware/
-│   └── esp32/
-│       ├── CoachPilot_ESP32.ino     # Production C++ firmware (I2S DMA + SSD1306 OLED)
-│       ├── HARDWARE_DESIGN.md       # Complete hardware engineering specification
-│       ├── wiring_diagram.md        # Pinout schematic and connection table
-│       └── platformio.ini           # PlatformIO project configuration
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── routes_hardware.py   # Compact OLED JSON & raw binary audio ingestion
-│   │   │   ├── routes_voice.py      # Voice ingestion & Whisper transcription
-│   │   │   ├── routes_ideas.py      # Idea feasibility backlog & Prompt B decomposition
-│   │   │   ├── routes_tasks.py      # Actionable task management & auto-scheduling
-│   │   │   ├── routes_calendar.py   # Calendar sync & 7-day density map
-│   │   │   ├── routes_synthesis.py  # Morning synthesis & coaching nudges
-│   │   │   └── routes_nlp.py        # Dynamic NLP rescheduling parser
-│   │   ├── models/                  # SQLAlchemy / PostgreSQL Database Models
-│   │   ├── schemas/                 # Pydantic v2 schemas and prompt validation
-│   │   ├── services/                # DensityService, LLMService, SchedulerService, WhisperService
-│   │   ├── database.py              # SQLite / Supabase connection
-│   │   └── main.py                  # FastAPI application & static preview server
-│   ├── static/                      # Interactive Web Preview Dashboard
-│   ├── tests/                       # Automated Pytest Suite (11 passing tests)
-│   ├── Dockerfile                   # Cloud container definition
-│   ├── render.yaml                  # 1-click cloud deployment specification
-│   └── requirements.txt
-├── frontend/                        # Cross-Platform React Native (Expo) Mobile App
-│   ├── src/
-│   │   ├── components/              # DensityGauge, VoiceCaptureButton, StarterTaskCard, IdeaCard
-│   │   ├── screens/                 # DashboardScreen, IdeasScreen, CalendarDensityScreen
-│   │   ├── services/                # API client
-│   │   └── types/                   # TypeScript interfaces
-│   └── App.tsx
-└── README.md
-```
+- Inspect your **Idea Backlog** and feasibility radar scores.
+- View your **7-Day Rolling Density Forecast**.
+- Tap **Auto-Schedule** on any starter step or manual task.
 
 ---
 
@@ -220,10 +280,18 @@ coach-pilot/
 
 ---
 
-## 🧪 Local Backend Testing
+## 🧪 Local Backend Testing & Web Preview
 
 Run the automated test suite locally:
 ```bash
 cd backend
 PYTHONPATH=. .venv/bin/pytest -v
 ```
+
+Launch the interactive local web dashboard:
+```bash
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+Open **`http://localhost:8000`** in your browser.
