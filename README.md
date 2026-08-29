@@ -65,6 +65,54 @@ flowchart TD
 
 ---
 
+### 🚦 How Prompts A, B, and C Are Identified & Routed
+
+The system orchestrates Prompts A, B, and C through a **Hierarchical Decision Pipeline** in the backend:
+
+```mermaid
+flowchart TD
+    A[Raw Voice Ingestion from ESP32 / Mobile] --> B[Whisper STT: Audio to Text]
+    B --> C[Always Ingest into PROMPT A: Triage & Intent Classifier]
+    
+    C -->|Intent Classification Result| D{What is the Classification?}
+    
+    D -->|BIG_IDEA / HYBRID| E[1. Save Idea with Feasibility & Friction Scores]
+    E --> F[2. Automatically Chain to PROMPT B: Step Decomposition]
+    F --> G[3. Automatically Chain to PROMPT C: Green Day Auto-Placement]
+    
+    D -->|IMMEDIATE_TASK| H[Log task into DB -> Schedule into Next Open Slot]
+    
+    D -->|CALENDAR_COMMAND| I[Direct Hand-off to PROMPT C: Dynamic NLP Rescheduler]
+    
+    J[Explicit User NLP Chat Command e.g. /api/nlp/command] --> I
+```
+
+#### 1. How Prompt A is Identified (The Front-Door Gateway)
+- **Trigger:** *Every single raw voice recording or thought enters Prompt A first.*
+- **Classification Engine:** Evaluates semantic markers and vocabulary:
+  - **`BIG_IDEA`**: Ambitious vision, startup concept, new product, or open-ended thought (*"I want to build an automated legal client intake bot..."*).
+  - **`IMMEDIATE_TASK`**: Concrete errand or logistical requirement (*"Email Sarah the revised budget by 3 PM"*).
+  - **`CALENDAR_COMMAND`**: Time manipulation verbs (*"Clear Thursday afternoon", "Move my 2 PM meeting"*).
+  - **`HYBRID`**: Contains both a strategic thought and an immediate action.
+
+#### 2. How Prompt B is Identified (Conditional Automatic Chaining)
+- **Trigger:** *Triggered automatically whenever Prompt A outputs `BIG_IDEA` or `HYBRID` (or on-demand via `/api/ideas/{id}/decompose`).*
+- **Action:** Ingests the idea title, feasibility rating, and obstacle diagnosis to generate 3–5 sequential milestones where **Step 1 is strictly a $\le 15$-minute Micro-Ignition Action** (zero activation friction).
+
+#### 3. How Prompt C is Identified (Intent Routing & Auto-Scheduling)
+- **Trigger Scenario 1 (Natural Language Rescheduling):** Triggered when Prompt A detects `CALENDAR_COMMAND` or the user enters a prompt in the dynamic NLP command bar. Prompt C shifts conflicted blocks and floats tasks to low-density days.
+- **Trigger Scenario 2 (Smart Auto-Placement):** Triggered automatically after Prompt B produces the Step 1 ignition task. The backend's `SchedulerService` evaluates 7-day density ($D(d)$) and calls Prompt C to book the task into the earliest **Green Focus Day** ($D < 0.45$).
+
+#### Summary Table: Prompts A, B, and C
+
+| Prompt | Role | Input Data | Trigger Condition | Output & Impact |
+| :--- | :--- | :--- | :--- | :--- |
+| **Prompt A** | **Triage & Feasibility Coach** | Transcribed voice text | **Always** on any incoming voice note | Classification (`BIG_IDEA`, `IMMEDIATE_TASK`, `CALENDAR_COMMAND`) + Feasibility (1-100) & Coaching Verdict |
+| **Prompt B** | **Behavioral Decomposer** | Idea title, summary, obstacle | Automatically chained on **`BIG_IDEA`** | 3–5 sequential tasks with **Step 1 as a $\le 15$-min Micro-Ignition action** |
+| **Prompt C** | **Density Allocator & Rescheduler** | 7-day density snapshots + NLP command + tasks | Triggered on **`CALENDAR_COMMAND`**, NLP command bar, or auto-placement | Rebalanced calendar slots, floated tasks, and Google/Apple Calendar event writes |
+
+---
+
 ### Step 1: Speech-to-Text (STT) Ingestion
 - When you hold the physical button on the ESP32, the **INMP441 I2S microphone** streams 16,000 samples/sec at 16-bit mono depth into a direct memory buffer.
 - Releasing the button sends the binary WAV stream to `/api/hardware/voice-upload`.
