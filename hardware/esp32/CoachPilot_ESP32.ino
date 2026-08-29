@@ -1,11 +1,12 @@
 /**
- * CoachPilot AI — ESP32 Hardware Companion Firmware
- * Features:
- * - INMP441 I2S Digital Microphone recording with automatic 44-byte WAV header encoding
- * - 0.96" / 1.3" I2C SSD1306 OLED Display UI (128x64 pixels)
- * - Push-to-Talk Tactile Button with Live VU-Meter animation
- * - Schedule Density Gauge, Starter Steps scroller, and Coaching Ticker
- * - HTTP REST client communicating with FastAPI backend
+ * CoachPilot AI (My Buddy) — Production ESP32 Hardware Companion Firmware
+ * 
+ * Hardware Modules Supported:
+ * - ESP32 / ESP32-S3 DevKit
+ * - INMP441 I2S Digital Microphone (16kHz, 16-bit Mono PCM + 44-byte WAV header)
+ * - SSD1306 0.96" / 1.3" 128x64 I2C OLED Display
+ * - Tactile Push-to-Talk Button (Active LOW with internal pull-up)
+ * - Status LED Indicator
  */
 
 #include <WiFi.h>
@@ -20,15 +21,15 @@
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
 
-// Replace with your Cloud URL (e.g. Render/Fly.io) or local LAN IP
-const char* SERVER_BASE = "https://your-coachpilot-app.onrender.com";
+// Server URL: Your 24/7 Cloud backend (Render/Fly.io) or local LAN IP
+const char* SERVER_BASE = "https://your-backend-app.onrender.com";
 
 // Pin Configurations
 #define PIN_BUTTON      4
 #define PIN_STATUS_LED  2
 
 // INMP441 I2S Microphone Pins
-#define I2S_WS          25   // L/R Word Select Clock
+#define I2S_WS          25   // Word Select / LR Clock
 #define I2S_SD          32   // Serial Data In
 #define I2S_SCK         33   // Bit Clock
 #define I2S_PORT        I2S_NUM_0
@@ -39,10 +40,10 @@ const char* SERVER_BASE = "https://your-coachpilot-app.onrender.com";
 #define OLED_RESET      -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// Audio Buffer (16 kHz, 16-bit, Mono)
+// Audio Buffer Settings
 #define SAMPLE_RATE     16000
 #define BITS_PER_SAMPLE 16
-#define MAX_RECORD_SECS 10
+#define MAX_RECORD_SECS 8
 #define BUFFER_SIZE     (SAMPLE_RATE * (BITS_PER_SAMPLE / 8) * MAX_RECORD_SECS)
 
 // State Machine
@@ -61,7 +62,7 @@ size_t recordedBytes = 0;
 unsigned long lastDisplayPoll = 0;
 int animFrame = 0;
 
-// Dashboard Data
+// Dashboard State Data
 int densityPct = 35;
 String densityLevel = "LIGHT";
 String dateStr = "Today";
@@ -92,8 +93,9 @@ void setup() {
     digitalWrite(PIN_STATUS_LED, LOW);
 
     // Initialize I2C OLED (Default Address 0x3C)
+    Wire.begin(21, 22);
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-        Serial.println("SSD1306 allocation failed!");
+        Serial.println("SSD1306 allocation failed! Check wiring on GPIO 21 (SDA) & 22 (SCL).");
     }
     display.clearDisplay();
     display.setTextSize(1);
@@ -115,10 +117,18 @@ void setup() {
         retries++;
     }
 
-    // Allocate Audio Buffer (with 44-byte WAV header offset)
-    audioBuffer = (uint8_t*)malloc(BUFFER_SIZE + 44);
+    // Dynamic Heap / PSRAM Allocation for Audio Buffer
+    size_t allocSize = BUFFER_SIZE + 44; // 44 bytes reserved for standard WAV header
+    if (psramFound()) {
+        audioBuffer = (uint8_t*)ps_malloc(allocSize);
+        Serial.println("Allocated audio buffer in external PSRAM.");
+    } else {
+        audioBuffer = (uint8_t*)malloc(allocSize);
+        Serial.println("Allocated audio buffer in internal SRAM.");
+    }
+
     if (!audioBuffer) {
-        Serial.println("Error: Failed to allocate audio buffer!");
+        Serial.println("CRITICAL: Failed to allocate audio buffer memory!");
     }
 
     // Initialize I2S Audio Driver
@@ -155,8 +165,8 @@ void loop() {
             // Draw animated VU waveform while button is held
             drawRecordingScreen();
 
-            // Read I2S audio chunk
-            if (recordedBytes < BUFFER_SIZE) {
+            // Read I2S audio chunk into buffer (offset by 44 bytes for WAV header)
+            if (audioBuffer && (recordedBytes < BUFFER_SIZE)) {
                 size_t bytesRead = 0;
                 uint8_t temp[512];
                 i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, portMAX_DELAY);
@@ -166,7 +176,7 @@ void loop() {
                 }
             }
 
-            // Button released: Stop and upload
+            // Button released: Stop recording and upload
             if (digitalRead(PIN_BUTTON) == HIGH) {
                 digitalWrite(PIN_STATUS_LED, LOW);
                 if (recordedBytes > 1500) {
@@ -174,7 +184,7 @@ void loop() {
                     drawUploadingScreen();
                     uploadAudio();
                 } else {
-                    // Audio too short
+                    // Audio too short (< 0.1s)
                     currentState = STATE_IDLE;
                     drawDashboard();
                 }
@@ -183,7 +193,7 @@ void loop() {
         }
 
         case STATE_UPLOADING: {
-            // Handled synchronously in uploadAudio()
+            // Synchronously handled inside uploadAudio()
             break;
         }
 
@@ -235,6 +245,8 @@ void initI2S() {
 
 // ================= AUDIO UPLOAD =================
 void uploadAudio() {
+    if (!audioBuffer) return;
+
     // Generate standard 44-byte WAV header at buffer start
     writeWavHeader(audioBuffer, recordedBytes, SAMPLE_RATE, 1, 16);
 
@@ -243,7 +255,7 @@ void uploadAudio() {
         String url = String(SERVER_BASE) + "/api/hardware/voice-upload";
         http.begin(url);
         http.addHeader("Content-Type", "audio/wav");
-        http.setTimeout(15000); // 15-second timeout for LLM
+        http.setTimeout(15000); // 15-second timeout for LLM inference
 
         int httpCode = http.POST(audioBuffer, recordedBytes + 44);
         if (httpCode == 200) {
@@ -257,7 +269,7 @@ void uploadAudio() {
 
             currentState = STATE_RESULT;
         } else {
-            drawErrorScreen("HTTP " + String(httpCode));
+            drawErrorScreen("HTTP Error " + String(httpCode));
             currentState = STATE_ERROR;
         }
         http.end();
