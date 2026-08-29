@@ -37,55 +37,172 @@
 
 ---
 
-## 🔄 Complete End-to-End Workflow
+## 🧠 The AI & LLM Intelligence Pipeline
+
+CoachPilot uses a multi-stage cognitive pipeline that converts uncompressed voice recordings into structured, scheduled calendar commitments and executive coaching insights.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant ESP32 as ESP32 Desk Device
-    participant Backend as FastAPI Cloud Gateway
-    participant LLM as LLM Intelligence (Whisper + Prompts)
-    participant DB as Database / Calendar Sync
-
-    Note over User,ESP32: 1. Morning Routine & Idle Display
-    ESP32->>Backend: GET /api/hardware/display-data
-    Backend->>DB: Fetch today's events & calculate density D(d)
-    Backend-->>ESP32: JSON (Density: 35%, Mtgs: 2, Step 1 Task, Coaching Nudge)
-    ESP32->>ESP32: Render 128x64 Dashboard on OLED
-
-    Note over User,ESP32: 2. Push-to-Talk Voice Capture
-    User->>ESP32: Hold Push-Button & Speak Idea / Task
-    ESP32->>ESP32: INMP441 records 16kHz PCM via I2S DMA (VU-meter animates)
-    User->>ESP32: Release Button
-    ESP32->>Backend: POST /api/hardware/voice-upload (Binary WAV Audio)
-
-    Note over Backend,LLM: 3. AI Triage, Feasibility Coaching & Auto-Placement
-    Backend->>LLM: Whisper STT -> Prompt A (Input Classification & Feasibility)
-    alt Classification == BIG_IDEA
-        LLM-->>Backend: Feasibility (88%), Impact (92%), Friction (40%), Verdict & Obstacle
-        Backend->>LLM: Prompt B (Decompose into <=15m Micro-Ignition Action)
-        LLM-->>Backend: Step 1 Action: "Draft 3 value propositions (10 mins)"
-        Backend->>Backend: Scheduler: Find upcoming Green Day (D < 0.45) & slot task
-        Backend->>DB: Write Task + Create Synced Calendar Event block
-    else Classification == IMMEDIATE_TASK
-        LLM-->>Backend: Immediate Task logged
-    else Classification == CALENDAR_COMMAND
-        Backend->>LLM: Prompt C (NLP Reschedule: "Clear Thursday afternoon...")
-        LLM-->>Backend: Move conflicted tasks to low-density days
-    end
-
-    Backend-->>ESP32: Status (IDEA: 88% Feasible, Step 1 Title, Scheduled Time)
-    ESP32->>ESP32: Display Confirmation Screen for 3.5s -> Return to Dashboard
+flowchart TD
+    A[Raw Audio: 16kHz WAV from ESP32] --> B[Whisper STT / Speech-to-Text]
+    B --> C[Clean Raw Transcript Text]
+    
+    C --> D{Prompt A: Cognitive Triage & Feasibility Coach}
+    
+    D -->|Immediate Errand| E[IMMEDIATE_TASK: Log directly to DB]
+    D -->|Calendar Modification| F[CALENDAR_COMMAND: Route to Prompt C]
+    D -->|Ambitious Concept| G[BIG_IDEA: Feasibility & Friction Analysis]
+    
+    G --> H[Prompt B: Behavioral Step Decomposition]
+    H --> I[Step 1: <=15m Micro-Ignition Action]
+    H --> J[Steps 2-4: Progressive Execution Milestones]
+    
+    I --> K[Prompt C: Schedule Density Allocator]
+    K --> L[Calculate 7-Day Density D(d)]
+    L --> M[Auto-Book into Green Day Focus Slot]
+    M --> N[Bi-directional Write to Google/Apple Calendar]
+    N --> O[Instant OLED Feedback on ESP32]
 ```
 
-### The 5 Core Product Steps in Detail
+---
 
-1. **Morning Cognitive Synthesis**: When idle on your desk, the OLED display continuously shows your daily cognitive load score ($D \in [0, 100\%]$), your scheduled meeting count, your highest-priority **Step 1 Ignition Task**, and an executive coaching ticker.
-2. **Frictionless Voice Capture**: Press and hold the physical button to record any unfiltered thought. The ESP32 captures uncompressed 16 kHz 16-bit mono audio with live waveform VU animations.
-3. **Idea Feasibility & Reality Check (Prompt A)**: The cloud backend feeds audio to Whisper and Prompt A. For big ideas, it scores venture feasibility (1-100), impact potential, and identifies the core emotional or technical friction causing procrastination.
-4. **Behavioral Step Decomposition (Prompt B)**: Ambitious ideas are broken down into 3–5 progressive steps, strictly enforcing that **Step 1 is a $\le 15$-minute Micro-Ignition Action** (zero setup friction to eliminate task paralysis).
-5. **Cognitive Schedule Density Engine & Auto-Placement (Prompt C)**: The system analyzes your calendar load over the next 7 days and automatically books your micro starter task into an open focus window on the earliest **Green Focus Day** ($D < 0.45$), syncing directly to your Google and Apple Calendars.
+### Step 1: Speech-to-Text (STT) Ingestion
+- When you hold the physical button on the ESP32, the **INMP441 I2S microphone** streams 16,000 samples/sec at 16-bit mono depth into a direct memory buffer.
+- Releasing the button sends the binary WAV stream to `/api/hardware/voice-upload`.
+- The backend passes the audio payload to **OpenAI Whisper (`whisper-1`)** or **Google Gemini Multimodal Audio**, converting messy, unfiltered spoken thoughts into clean natural text.
+
+---
+
+### Step 2: Prompt A — Input Triage, Classification & Feasibility Coaching
+**Prompt A** acts as an Executive Coach. It analyzes the raw transcript and categorizes it into one of four intent classes:
+
+1. **`BIG_IDEA`**: An entrepreneurial, creative, or technical vision requiring multiple execution steps.
+2. **`IMMEDIATE_TASK`**: A single-action errand or logistical item (*"Email Sarah the revised budget by 3 PM"*).
+3. **`CALENDAR_COMMAND`**: A directive to clear, shift, or reschedule time (*"Clear my Thursday afternoon"*).
+4. **`HYBRID`**: A thought containing both an idea and an immediate task.
+
+#### Feasibility & Friction Evaluation Engine (For Big Ideas)
+For any `BIG_IDEA`, Prompt A computes:
+- **Feasibility Score ($1–100$)**: Realistic execution probability considering real-world constraints.
+- **Impact Potential ($1–100$)**: Strategic upside and value creation.
+- **Friction Score ($1–100$)**: Psychological, technical, or capital barrier causing procrastination.
+- **Primary Obstacle**: The exact emotional or technical bottleneck blocking progress.
+- **Coaching Verdict**: A blunt, 2-sentence reality check and actionable challenge.
+
+#### Prompt A Output Schema (Structured JSON)
+```json
+{
+  "classification": "BIG_IDEA",
+  "confidence": 0.96,
+  "idea_analysis": {
+    "title": "AI Client Intake for Law Firms",
+    "category": "business",
+    "summary": "Voice-enabled intake bot that summarizes client claims before consultation calls.",
+    "feasibility_score": 88,
+    "impact_score": 92,
+    "friction_score": 40,
+    "primary_obstacle": "Over-engineering compliance before validating attorney interest.",
+    "coaching_verdict": "High commercial demand with standard tech stack. Don't build custom models before closing 2 pilot test firms with a 1-page script.",
+    "nudge_strategy": "Draft 5 core intake questions in Apple Notes and send to 1 attorney contact today."
+  },
+  "extracted_tasks": [],
+  "coaching_nudge": "This idea has strong potential. Let's knock out the 10-minute starter action before lunch!"
+}
+```
+
+---
+
+### Step 3: Prompt B — Micro-Ignition Task Decomposition
+To prevent task paralysis, **Prompt B** decomposes the approved idea into 3–5 progressive milestones, strictly enforcing the **Micro-Ignition Rule**:
+- **Step 1 MUST be a Micro-Ignition Action ($\le 15$ mins, Friction: `micro`)**: Zero complex setup required. Provides instant emotional momentum.
+- Each subsequent step is classified by **Energy Type** (`creative`, `deep_focus`, `admin`, `low_energy`) and **Friction Level** (`micro`, `easy`, `medium`, `deep_work`).
+
+#### Prompt B Output Schema (Structured JSON)
+```json
+{
+  "tasks": [
+    {
+      "sequence_order": 1,
+      "title": "Draft 5 core intake questionnaire prompts (10 mins)",
+      "description": "Write down the exact 5 questions an intake bot must ask incoming personal injury leads.",
+      "is_starter_step": true,
+      "estimated_minutes": 15,
+      "friction_level": "micro",
+      "energy_requirement": "creative",
+      "priority": "high"
+    },
+    {
+      "sequence_order": 2,
+      "title": "Set up minimal FastAPI route accepting voice audio",
+      "description": "Build endpoint testing Whisper transcription latency.",
+      "is_starter_step": false,
+      "estimated_minutes": 35,
+      "friction_level": "easy",
+      "energy_requirement": "deep_focus",
+      "priority": "medium"
+    }
+  ]
+}
+```
+
+---
+
+### Step 4: Prompt C — Cognitive Density Auto-Placement & Dynamic Rescheduling
+**Prompt C** evaluates your upcoming 7-day calendar density $D(d)$ and automatically matches the cognitive demands of the task with open focus windows on low-density **Green Days** ($D < 0.45$).
+
+It also handles conversational natural language calendar modifications:
+- *"Clear my Thursday afternoon and float those tasks to next week."*
+- *"Free up Friday morning for deep focus."*
+
+#### Prompt C Output Schema (Structured JSON)
+```json
+{
+  "operation_type": "NLP_RESCHEDULE_AND_FLOAT",
+  "command_summary": "Cleared Thursday afternoon (shifted 2 tasks to Monday morning). Auto-scheduled starter task into Friday 10:00 AM green slot.",
+  "mutations": [
+    {
+      "action": "SCHEDULE_STARTER_TASK",
+      "item_title": "Draft 5 core intake questionnaire prompts",
+      "new_start": "2026-09-01T10:00:00Z",
+      "new_end": "2026-09-01T10:15:00Z",
+      "reason": "Placed into Monday morning low-density focus window (Density: 0.35)"
+    }
+  ],
+  "coaching_nudge": "Thursday is cleared. Your 15-minute starter action is lined up for Monday at 10:00 AM!"
+}
+```
+
+---
+
+## 🔌 How to Connect to LLMs (OpenAI / Gemini / Claude)
+
+CoachPilot supports **Google Gemini**, **OpenAI GPT-4o & Whisper**, **Anthropic Claude**, and an **Offline Cognitive Simulation Mode** (no API key required).
+
+### Option 1: Google Gemini (Recommended — Ultra-Fast & Free Tier Available)
+1. Get a free API Key at **[aistudio.google.com](https://aistudio.google.com/)**.
+2. Open `backend/.env` (or configure in Render/Fly.io Environment Variables):
+   ```env
+   LLM_PROVIDER=gemini
+   GEMINI_API_KEY=AIzaSyYourGeminiApiKeyHere
+   ```
+
+### Option 2: OpenAI (Whisper STT + GPT-4o)
+1. Get an API Key at **[platform.openai.com](https://platform.openai.com/)**.
+2. Set in `backend/.env`:
+   ```env
+   LLM_PROVIDER=openai
+   OPENAI_API_KEY=sk-proj-YourOpenAIApiKeyHere
+   ```
+
+### Option 3: Anthropic Claude (Claude 3.5 Sonnet)
+1. Get an API Key at **[console.anthropic.com](https://console.anthropic.com/)**.
+2. Set in `backend/.env`:
+   ```env
+   LLM_PROVIDER=anthropic
+   ANTHROPIC_API_KEY=sk-ant-YourAnthropicApiKeyHere
+   ```
+
+### Option 4: Offline Cognitive Simulation Mode (Default)
+If you leave the API key blank or set `LLM_PROVIDER=simulation`, the backend automatically uses an embedded deterministic intelligence engine. This allows full testing of voice classification, feasibility scoring, task decomposition, and density scheduling with **zero external API costs**.
 
 ---
 
@@ -173,7 +290,7 @@ $$D(d) = \min\left(1.0, \frac{\sum_{i=1}^{N} (T_{i} \times W_{i}) + (N \times C_
 | **Push-to-Talk Button** | **Pin 1** | **GPIO 4** | Active LOW | Input Pull-up (`INPUT_PULLUP`) |
 | | **Pin 2** | **GND** | 0V | Ground |
 | **Status LED** | **Anode (+)** | **GPIO 2** | 3.3V (220Ω) | HIGH when recording |
-| | **Cathode (-)**| **GND** | 0V | Ground |
+| | **Cathode (-)**| **GND** | Ground |
 
 ---
 
@@ -222,23 +339,9 @@ Deploy the backend to **Render.com** (or Fly.io / Railway) for free in 3 minutes
    - **Build Command:** `pip install -r backend/requirements.txt`
    - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 4. Add your API Keys in **Environment Variables**:
-   - `OPENAI_API_KEY`: `your_openai_key`
-   - `GEMINI_API_KEY`: `your_gemini_key`
-   - `LLM_PROVIDER`: `gemini` (or `openai`)
+   - `GEMINI_API_KEY`: `your_gemini_api_key`
+   - `LLM_PROVIDER`: `gemini`
 5. Copy your live Render URL (e.g., `https://coachpilot-backend.onrender.com`) and paste it into `SERVER_BASE` in the ESP32 firmware.
-
----
-
-## 💬 Conversational NLP Rescheduling Examples
-
-You can speak or type dynamic natural language calendar commands anytime:
-
-- *"Clear my Thursday afternoon and float those tasks to next week."*
-- *"Free up Friday morning for deep focus."*
-- *"Move my 2 PM design review to tomorrow morning."*
-- *"Schedule a 45-minute deep focus block on my next Green Day."*
-
-The backend's **Prompt C** will automatically inspect the 7-day density forecast, calculate conflict-free windows, update tasks, and write the new schedule to Google Calendar.
 
 ---
 
