@@ -1,12 +1,11 @@
 /**
- * CoachPilot AI (My Buddy) — Production ESP32 Hardware Companion Firmware
+ * CoachPilot AI (My Buddy) — Production ESP32 / ESP32-S3 Hardware Firmware
  * 
- * Hardware Modules Supported:
- * - ESP32 / ESP32-S3 DevKit
- * - INMP441 I2S Digital Microphone (16kHz, 16-bit Mono PCM + 44-byte WAV header)
- * - SSD1306 0.96" / 1.3" 128x64 I2C OLED Display
- * - Tactile Push-to-Talk Button (Active LOW with internal pull-up)
- * - Status LED Indicator
+ * Target Board: Waveshare ESP32-S3 Mini / Zero (ESP32-S3FH4R2) & Standard ESP32
+ * - MCU: ESP32-S3 Dual-Core 240MHz with 4MB Flash & 2MB Built-in Quad PSRAM (R2)
+ * - Microphone: INMP441 I2S Omnidirectional Digital Mic (16kHz 16-bit Mono)
+ * - Display: SSD1306 0.96" / 1.3" 128x64 I2C OLED
+ * - Button: Push-to-Talk Tactile Button (Active LOW)
  */
 
 #include <WiFi.h>
@@ -17,6 +16,10 @@
 #include <ArduinoJson.h>
 #include <driver/i2s.h>
 
+// ================= BOARD SELECTION =================
+// Set to 1 for Waveshare ESP32-S3 Mini/Zero (ESP32-S3FH4R2), or 0 for Classic ESP32-WROOM
+#define BOARD_ESP32_S3  1
+
 // ================= USER CONFIGURATION =================
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
@@ -24,26 +27,39 @@ const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
 // Server URL: Your 24/7 Cloud backend (Render/Fly.io) or local LAN IP
 const char* SERVER_BASE = "https://your-backend-app.onrender.com";
 
-// Pin Configurations
-#define PIN_BUTTON      4
-#define PIN_STATUS_LED  2
+// ================= PIN DEFINITIONS =================
+#if BOARD_ESP32_S3
+  // Optimal Pinout for Waveshare ESP32-S3 Mini / Zero (ESP32-S3FH4R2)
+  #define PIN_BUTTON      6   // Push-to-Talk Button (GPIO 6 to GND)
+  #define PIN_STATUS_LED  10  // Status LED (or use on-board WS2812 on GPIO 21)
+  #define PIN_I2C_SDA     8   // OLED I2C SDA
+  #define PIN_I2C_SCL     9   // OLED I2C SCL
+  #define I2S_SD          1   // INMP441 Serial Data Out (SD)
+  #define I2S_WS          2   // INMP441 Word Select / LRCLK (WS)
+  #define I2S_SCK         3   // INMP441 Bit Clock (SCK)
+#else
+  // Classic ESP32-WROOM-32 Pinout
+  #define PIN_BUTTON      4
+  #define PIN_STATUS_LED  2
+  #define PIN_I2C_SDA     21
+  #define PIN_I2C_SCL     22
+  #define I2S_SD          32
+  #define I2S_WS          25
+  #define I2S_SCK         33
+#endif
 
-// INMP441 I2S Microphone Pins
-#define I2S_WS          25   // Word Select / LR Clock
-#define I2S_SD          32   // Serial Data In
-#define I2S_SCK         33   // Bit Clock
 #define I2S_PORT        I2S_NUM_0
 
-// OLED Display (I2C SSD1306)
+// OLED Display Settings (128x64 I2C)
 #define SCREEN_WIDTH    128
 #define SCREEN_HEIGHT   64
 #define OLED_RESET      -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// Audio Buffer Settings
+// Audio Buffer Settings (16 kHz, 16-bit, Mono)
 #define SAMPLE_RATE     16000
 #define BITS_PER_SAMPLE 16
-#define MAX_RECORD_SECS 8
+#define MAX_RECORD_SECS 10  // 10 seconds of high-fidelity audio
 #define BUFFER_SIZE     (SAMPLE_RATE * (BITS_PER_SAMPLE / 8) * MAX_RECORD_SECS)
 
 // State Machine
@@ -62,7 +78,7 @@ size_t recordedBytes = 0;
 unsigned long lastDisplayPoll = 0;
 int animFrame = 0;
 
-// Dashboard State Data
+// Dashboard Data
 int densityPct = 35;
 String densityLevel = "LIGHT";
 String dateStr = "Today";
@@ -92,10 +108,10 @@ void setup() {
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
 
-    // Initialize I2C OLED (Default Address 0x3C)
-    Wire.begin(21, 22);
+    // Initialize I2C Bus with assigned pins
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-        Serial.println("SSD1306 allocation failed! Check wiring on GPIO 21 (SDA) & 22 (SCL).");
+        Serial.println("SSD1306 allocation failed! Check wiring on SDA/SCL.");
     }
     display.clearDisplay();
     display.setTextSize(1);
@@ -103,7 +119,7 @@ void setup() {
     display.setCursor(10, 15);
     display.println("CoachPilot AI");
     display.setCursor(10, 32);
-    display.println("Hardware Companion");
+    display.println("ESP32-S3 Companion");
     display.setCursor(10, 48);
     display.println("Connecting WiFi...");
     display.display();
@@ -118,10 +134,11 @@ void setup() {
     }
 
     // Dynamic Heap / PSRAM Allocation for Audio Buffer
+    // ESP32-S3FH4R2 has 2MB built-in Quad PSRAM (R2)
     size_t allocSize = BUFFER_SIZE + 44; // 44 bytes reserved for standard WAV header
     if (psramFound()) {
         audioBuffer = (uint8_t*)ps_malloc(allocSize);
-        Serial.println("Allocated audio buffer in external PSRAM.");
+        Serial.println("PSRAM detected! Allocated 10s audio buffer in 2MB PSRAM.");
     } else {
         audioBuffer = (uint8_t*)malloc(allocSize);
         Serial.println("Allocated audio buffer in internal SRAM.");
@@ -193,7 +210,7 @@ void loop() {
         }
 
         case STATE_UPLOADING: {
-            // Synchronously handled inside uploadAudio()
+            // Handled inside uploadAudio()
             break;
         }
 
