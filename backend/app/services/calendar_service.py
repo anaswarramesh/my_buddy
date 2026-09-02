@@ -162,14 +162,96 @@ class CalendarService:
             return {"error": resp.text, "status_code": resp.status_code}
 
     @staticmethod
-    async def sync_google_events(db: Session, user_id: str, access_token: str, days: int = 7) -> int:
+    def save_oauth_tokens(db: Session, user_id: str, tokens: Dict[str, Any], provider: str = "google"):
         """
-        Pulls upcoming events from user's primary Google Calendar and syncs with database.
+        Persists Google OAuth access and refresh tokens in OAuthCredential table.
         """
+        from app.models.oauth import OAuthCredential
+        access_token = tokens.get("access_token")
+        refresh_token = tokens.get("refresh_token")
+        expires_in = tokens.get("expires_in", 3600)
+        expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
+
+        cred = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == provider
+        ).first()
+
+        if not cred:
+            cred = OAuthCredential(
+                user_id=user_id,
+                provider=provider,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                last_synced_at=datetime.utcnow()
+            )
+            db.add(cred)
+        else:
+            cred.access_token = access_token
+            if refresh_token:
+                cred.refresh_token = refresh_token
+            cred.expires_at = expires_at
+            cred.last_synced_at = datetime.utcnow()
+
+        db.commit()
+        db.refresh(cred)
+        return cred
+
+    @staticmethod
+    async def get_valid_google_token(db: Session, user_id: str) -> Optional[str]:
+        """
+        Retrieves a valid access token for the user, refreshing it if expired.
+        """
+        from app.models.oauth import OAuthCredential
+        from app.config import settings
         import httpx
 
+        cred = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google"
+        ).first()
+
+        if not cred or not cred.access_token:
+            return None
+
+        # If expiring in < 5 mins and refresh token is available, refresh it
+        if cred.expires_at and cred.expires_at <= datetime.utcnow() + timedelta(minutes=5):
+            if cred.refresh_token:
+                try:
+                    url = "https://oauth2.googleapis.com/token"
+                    data = {
+                        "client_id": settings.google_client_id,
+                        "client_secret": settings.google_client_secret,
+                        "refresh_token": cred.refresh_token,
+                        "grant_type": "refresh_token"
+                    }
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(url, data=data)
+                        if resp.status_code == 200:
+                            tok_data = resp.json()
+                            cred.access_token = tok_data.get("access_token", cred.access_token)
+                            expires_in = tok_data.get("expires_in", 3600)
+                            cred.expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
+                            db.commit()
+                except Exception as e:
+                    print(f"[Google OAuth] Failed refreshing access token: {e}")
+
+        return cred.access_token
+
+    @staticmethod
+    async def sync_google_events(db: Session, user_id: str, access_token: str, days: int = 7) -> int:
+        """
+        Pulls upcoming events from user's primary Google Calendar and mirrors with database:
+        - Inserts newly created Google events
+        - Updates modified events (time, summary, description)
+        - Removes events deleted from Google Calendar
+        """
+        import httpx
+        from app.models.oauth import OAuthCredential
+
         now = datetime.utcnow()
-        time_min = now.isoformat() + "Z"
+        time_min = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat() + "Z"
         time_max = (now + timedelta(days=days)).isoformat() + "Z"
 
         url = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
@@ -178,19 +260,35 @@ class CalendarService:
             "timeMin": time_min,
             "timeMax": time_max,
             "singleEvents": "true",
-            "orderBy": "startTime"
+            "orderBy": "startTime",
+            "maxResults": 250
         }
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, params=params)
             if resp.status_code != 200:
+                print(f"[Google Calendar Sync] Failed: {resp.status_code} {resp.text}")
                 return 0
 
             data = resp.json()
             items = data.get("items", [])
             synced_count = 0
+            active_google_ids = set()
 
             for item in items:
+                ext_id = item.get("id")
+                if not ext_id:
+                    continue
+
+                status = item.get("status")
+                if status == "cancelled":
+                    # Delete if previously synced
+                    db.query(CalendarEvent).filter(
+                        CalendarEvent.user_id == user_id,
+                        CalendarEvent.external_event_id == ext_id
+                    ).delete(synchronize_session=False)
+                    continue
+
                 title = item.get("summary", "Untitled Meeting")
                 start_raw = item.get("start", {}).get("dateTime") or item.get("start", {}).get("date")
                 end_raw = item.get("end", {}).get("dateTime") or item.get("end", {}).get("date")
@@ -198,35 +296,68 @@ class CalendarService:
                 if not start_raw:
                     continue
 
-                # Parse datetime (handling ISO format with tz)
+                is_all_day = "date" in item.get("start", {}) and "dateTime" not in item.get("start", {})
+
                 try:
                     start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
                     end_dt = datetime.fromisoformat(end_raw.replace("Z", "+00:00")) if end_raw else start_dt + timedelta(minutes=30)
                 except Exception:
                     continue
 
-                # Deduplicate or add
+                start_naive = start_dt.replace(tzinfo=None)
+                end_naive = end_dt.replace(tzinfo=None)
+
+                active_google_ids.add(ext_id)
+
                 existing = db.query(CalendarEvent).filter(
                     CalendarEvent.user_id == user_id,
-                    CalendarEvent.title == title,
-                    CalendarEvent.start_time == start_dt.replace(tzinfo=None)
+                    CalendarEvent.external_event_id == ext_id
                 ).first()
 
-                if not existing:
+                if existing:
+                    existing.title = title
+                    existing.start_time = start_naive
+                    existing.end_time = end_naive
+                    existing.is_all_day = is_all_day
+                    existing.description = item.get("description", "")
+                    existing.location = item.get("location", "")
+                    synced_count += 1
+                else:
                     ev = CalendarEvent(
                         user_id=user_id,
-                        external_event_id=item.get("id"),
+                        external_event_id=ext_id,
                         title=title,
                         description=item.get("description", ""),
                         location=item.get("location", ""),
-                        start_time=start_dt.replace(tzinfo=None),
-                        end_time=end_dt.replace(tzinfo=None),
+                        start_time=start_naive,
+                        end_time=end_naive,
+                        is_all_day=is_all_day,
                         event_category="google_calendar",
                         cognitive_weight=1.0,
                         is_fixed=True
                     )
                     db.add(ev)
                     synced_count += 1
+
+            # Clean up any Google Calendar events that were deleted on Google's side
+            if active_google_ids:
+                start_window = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_window = start_window + timedelta(days=days)
+                db.query(CalendarEvent).filter(
+                    CalendarEvent.user_id == user_id,
+                    CalendarEvent.event_category == "google_calendar",
+                    CalendarEvent.start_time >= start_window,
+                    CalendarEvent.start_time <= end_window,
+                    ~CalendarEvent.external_event_id.in_(active_google_ids)
+                ).delete(synchronize_session=False)
+
+            # Update last synced time on OAuthCredential
+            cred = db.query(OAuthCredential).filter(
+                OAuthCredential.user_id == user_id,
+                OAuthCredential.provider == "google"
+            ).first()
+            if cred:
+                cred.last_synced_at = datetime.utcnow()
 
             db.commit()
             return synced_count

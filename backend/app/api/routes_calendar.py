@@ -160,6 +160,9 @@ async def google_calendar_callback(
     access_token = tokens.get("access_token")
     user_id = state or "default-user"
 
+    # Persist OAuth tokens so automatic and background sync works
+    CalendarService.save_oauth_tokens(db, user_id, tokens, provider="google")
+
     # Sync events for upcoming 7 days
     synced_count = await CalendarService.sync_google_events(db, user_id, access_token, days=7)
 
@@ -176,4 +179,42 @@ async def google_calendar_callback(
         </body>
     </html>
     """)
+
+@router.post("/google/sync")
+async def sync_google_calendar_endpoint(user_id: str = "default-user", db: Session = Depends(get_db)):
+    """
+    Triggers an immediate on-demand synchronization with Google Calendar.
+    """
+    token = await CalendarService.get_valid_google_token(db, user_id)
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Calendar is not linked. Please click 'Connect Google Calendar' first."
+        )
+
+    synced_count = await CalendarService.sync_google_events(db, user_id, token, days=7)
+    return {
+        "status": "success",
+        "synced_count": synced_count,
+        "message": f"Successfully synchronized {synced_count} events from Google Calendar."
+    }
+
+@router.get("/google/status")
+def get_google_sync_status(user_id: str = "default-user", db: Session = Depends(get_db)):
+    """
+    Checks if Google Calendar is connected and when it was last synced.
+    """
+    from app.models.oauth import OAuthCredential
+    cred = db.query(OAuthCredential).filter(
+        OAuthCredential.user_id == user_id,
+        OAuthCredential.provider == "google"
+    ).first()
+
+    if not cred or not cred.access_token:
+        return {"connected": False, "last_synced_at": None}
+
+    return {
+        "connected": True,
+        "last_synced_at": cred.last_synced_at.isoformat() if cred.last_synced_at else None
+    }
 
