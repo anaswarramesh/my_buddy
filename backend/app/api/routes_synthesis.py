@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from datetime import date
-from typing import Dict, Any, List
+from datetime import date, datetime, time
+from typing import Dict, Any, List, Optional
 from app.database import get_db
 from app.models.task import Task
 from app.services.calendar_service import CalendarService
@@ -12,30 +12,52 @@ from app.schemas.task import TaskResponse
 router = APIRouter(prefix="/api/synthesis", tags=["Daily Synthesis Dashboard"])
 
 @router.get("/daily")
-def get_daily_synthesis(user_id: str = "default-user", db: Session = Depends(get_db)) -> Dict[str, Any]:
+def get_daily_synthesis(
+    user_id: str = "default-user",
+    target_date: Optional[date] = None,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
     """
     Daily Morning Synthesis combining:
-    - Today's Density Meter & Level
-    - Today's Appointments
+    - Target Date's Density Meter & Level
+    - Target Date's Appointments
     - High-leverage Micro-Starter Tasks
     - AI Executive Coaching Nudge
     """
     today = date.today()
-    events = CalendarService.get_events_for_range(db, user_id, today, today)
-    density_res = DensityService.calculate_day_density(today, events)
+    selected_date = target_date or today
+    events = CalendarService.get_events_for_range(db, user_id, selected_date, selected_date)
+    density_res = DensityService.calculate_day_density(selected_date, events)
 
-    # Top starter / pending tasks
-    starter_tasks = db.query(Task).filter(
-        Task.user_id == user_id,
-        Task.status.in_(["pending", "scheduled"]),
-        Task.is_starter_step == True
-    ).limit(3).all()
+    # If today: include active pending & scheduled starter tasks
+    # If another date: filter tasks scheduled on that specific date
+    start_dt = datetime.combine(selected_date, time(0, 0, 0))
+    end_dt = datetime.combine(selected_date, time(23, 59, 59))
 
-    other_tasks = db.query(Task).filter(
+    scheduled_for_date = db.query(Task).filter(
         Task.user_id == user_id,
-        Task.status.in_(["pending", "scheduled"]),
-        Task.is_starter_step == False
-    ).limit(3).all()
+        Task.scheduled_start >= start_dt,
+        Task.scheduled_start <= end_dt
+    ).all()
+
+    if selected_date == today:
+        starter_tasks = db.query(Task).filter(
+            Task.user_id == user_id,
+            Task.status.in_(["pending", "scheduled"]),
+            Task.is_starter_step == True
+        ).limit(5).all()
+
+        other_tasks = [t for t in scheduled_for_date if not t.is_starter_step]
+        if not other_tasks:
+            other_tasks = db.query(Task).filter(
+                Task.user_id == user_id,
+                Task.status.in_(["pending", "scheduled"]),
+                Task.is_starter_step == False
+            ).limit(3).all()
+    else:
+        starter_tasks = [t for t in scheduled_for_date if t.is_starter_step]
+        other_tasks = [t for t in scheduled_for_date if not t.is_starter_step]
+
 
     # Dynamic Coaching Nudge based on density
     if density_res.density_level in ["dense", "overloaded"]:

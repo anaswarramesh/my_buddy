@@ -312,9 +312,9 @@
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center space-x-2">
                         <i data-lucide="clock" class="w-4 h-4 text-indigo-400"></i>
-                        <h3 class="text-sm font-semibold text-white">Today's Agenda & Auto-Scheduled Slots</h3>
+                        <h3 id="agendaCardTitle" class="text-sm font-semibold text-white">Today's Agenda & Auto-Scheduled Slots</h3>
                     </div>
-                    <span class="text-xs text-slate-400">9:00 AM – 6:00 PM Work Window</span>
+                    <span id="agendaCardSubtitle" class="text-xs text-slate-400">9:00 AM – 6:00 PM Work Window</span>
                 </div>
 
                 <div id="calendarEventsTimeline" class="space-y-2.5 max-h-72 overflow-y-auto pr-1">
@@ -328,23 +328,47 @@
     <script>
         let currentActiveTask = null;
         let currentActiveIdea = null;
+        let currentSelectedDate = new Date().toISOString().split('T')[0];
 
         // Initialize dashboard on load
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
-            fetchDailySynthesis();
+            fetchDailySynthesis(currentSelectedDate);
             fetchDensityForecast();
             fetchIdeas();
         });
 
-        async function fetchDailySynthesis() {
+        async function selectForecastDay(dateStr, dayName) {
+            currentSelectedDate = dateStr;
+            await fetchDailySynthesis(dateStr);
+            fetchDensityForecast(); // Re-render forecast cards to highlight active day
+        }
+
+        async function fetchDailySynthesis(targetDate = null) {
             try {
-                const res = await fetch('/api/synthesis/daily');
+                const dateQuery = targetDate || currentSelectedDate;
+                const url = dateQuery ? `/api/synthesis/daily?target_date=${dateQuery}` : '/api/synthesis/daily';
+                const res = await fetch(url);
                 const data = await res.json();
 
-                // Format current date
-                const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-                document.getElementById('currentDateLabel').innerText = todayStr;
+                // Format target date
+                const d = dateQuery ? new Date(dateQuery + 'T00:00:00') : new Date();
+                const todayStr = new Date().toISOString().split('T')[0];
+                const isToday = dateQuery === todayStr;
+                const dayLabel = isToday ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'long' });
+                const fullDateStr = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+                document.getElementById('currentDateLabel').innerText = fullDateStr;
+
+                // Update Agenda Card Header & Subtitle
+                const agendaTitle = document.getElementById('agendaCardTitle');
+                if (agendaTitle) {
+                    agendaTitle.innerText = `${dayLabel}'s Agenda & Assigned Tasks`;
+                }
+                const agendaSub = document.getElementById('agendaCardSubtitle');
+                if (agendaSub) {
+                    agendaSub.innerText = `${fullDateStr} · Density Load: ${Math.round(data.density.score * 100)}%`;
+                }
 
                 // Nudge Text
                 document.getElementById('coachingNudgeText').innerText = data.coaching_nudge;
@@ -378,8 +402,8 @@
                     circle.className = 'text-rose-400 fill-none transition-all duration-1000 ease-out';
                 }
 
-                // Render Timeline Events & Actionable Tasks
-                renderTimeline(data.today_events || [], data.starter_tasks || [], data.scheduled_tasks || []);
+                // Render Timeline Events & Actionable Tasks for Selected Day
+                renderTimeline(data.today_events || [], data.starter_tasks || [], data.scheduled_tasks || [], dayLabel);
                 
             } catch (err) {
                 console.error("Failed to load daily synthesis:", err);
@@ -399,18 +423,20 @@
                     const dateNum = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
                     const scorePct = Math.round(snap.density_score * 100);
 
-                    let colorClass = 'border-emerald-500/40 bg-emerald-950/20 text-emerald-300';
+                    let colorClass = 'border-emerald-500/40 bg-emerald-950/20 text-emerald-300 hover:border-emerald-400';
                     let dotColor = 'bg-emerald-400';
                     if (snap.density_level === 'moderate') {
-                        colorClass = 'border-amber-500/40 bg-amber-950/20 text-amber-300';
+                        colorClass = 'border-amber-500/40 bg-amber-950/20 text-amber-300 hover:border-amber-400';
                         dotColor = 'bg-amber-400';
                     } else if (snap.density_level === 'dense' || snap.density_level === 'overloaded') {
-                        colorClass = 'border-rose-500/40 bg-rose-950/20 text-rose-300';
+                        colorClass = 'border-rose-500/40 bg-rose-950/20 text-rose-300 hover:border-rose-400';
                         dotColor = 'bg-rose-400';
                     }
 
+                    const isSelected = snap.date === currentSelectedDate;
                     const card = document.createElement('div');
-                    card.className = `p-3 rounded-xl border ${colorClass} flex flex-col justify-between`;
+                    card.className = `p-3 rounded-xl border ${colorClass} flex flex-col justify-between cursor-pointer transition-all duration-200 transform hover:-translate-y-0.5 hover:shadow-lg ${isSelected ? 'ring-2 ring-indigo-400 shadow-indigo-500/30 scale-[1.04] bg-slate-900' : ''}`;
+                    card.onclick = () => selectForecastDay(snap.date, dayName);
                     card.innerHTML = `
                         <div class="flex items-center justify-between mb-1">
                             <span class="text-xs font-bold text-white">${dayName}</span>
@@ -421,9 +447,14 @@
                             <span class="text-base font-extrabold text-white">${scorePct}%</span>
                             <span class="block text-[10px] text-slate-400">${snap.available_focus_windows.length} focus slots</span>
                         </div>
+                        <div class="mt-2 pt-1 border-t border-slate-800 flex items-center justify-between text-[9px] ${isSelected ? 'text-indigo-300 font-semibold' : 'text-slate-500'}">
+                            <span>${isSelected ? '● Active' : 'Click to view'}</span>
+                            <i data-lucide="chevron-right" class="w-2.5 h-2.5"></i>
+                        </div>
                     `;
                     container.appendChild(card);
                 });
+                if (window.lucide) lucide.createIcons();
             } catch (err) {
                 console.error("Failed to load forecast:", err);
             }
@@ -475,20 +506,20 @@
                 });
         }
 
-        function renderTimeline(events, starterTasks = [], scheduledTasks = []) {
+        function renderTimeline(events, starterTasks = [], scheduledTasks = [], dayLabel = 'Today') {
             const container = document.getElementById('calendarEventsTimeline');
             container.innerHTML = '';
 
             // Section 1: Calendar Appointments (Determines % Load)
             const eventsHeader = document.createElement('div');
             eventsHeader.className = "flex items-center justify-between text-xs font-semibold text-slate-300 pb-1";
-            eventsHeader.innerHTML = `<span class="flex items-center space-x-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-400"></i><span>Calendar Commitments (${events.length})</span></span><span class="text-[10px] text-slate-400 font-normal">Calculates % Load</span>`;
+            eventsHeader.innerHTML = `<span class="flex items-center space-x-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-400"></i><span>Calendar Commitments for ${dayLabel} (${events.length})</span></span><span class="text-[10px] text-slate-400 font-normal">Calculates % Load</span>`;
             container.appendChild(eventsHeader);
 
             if (events.length === 0) {
                 const empty = document.createElement('p');
-                empty.className = "text-xs text-slate-500 py-2 text-center bg-slate-900/40 rounded-lg";
-                empty.innerText = "No appointments today. 100% open focus time.";
+                empty.className = "text-xs text-slate-500 py-2.5 text-center bg-slate-900/40 rounded-lg";
+                empty.innerText = `No calendar appointments for ${dayLabel}. 100% open focus time.`;
                 container.appendChild(empty);
             } else {
                 events.forEach(ev => {
@@ -514,17 +545,17 @@
                 });
             }
 
-            // Section 2: Actionable Tasks for Today
+            // Section 2: Actionable Tasks for Selected Day
             const allTasks = [...starterTasks, ...scheduledTasks];
             const tasksHeader = document.createElement('div');
             tasksHeader.className = "flex items-center justify-between text-xs font-semibold text-slate-300 pt-3 pb-1 border-t border-slate-800 mt-2";
-            tasksHeader.innerHTML = `<span class="flex items-center space-x-1.5"><i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i><span>Today's Actionable Tasks (${allTasks.length})</span></span><span class="text-[10px] text-indigo-400 font-normal">Execution Queue</span>`;
+            tasksHeader.innerHTML = `<span class="flex items-center space-x-1.5"><i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i><span>Tasks Assigned for ${dayLabel} (${allTasks.length})</span></span><span class="text-[10px] text-indigo-400 font-normal">Execution Queue</span>`;
             container.appendChild(tasksHeader);
 
             if (allTasks.length === 0) {
                 const empty = document.createElement('p');
-                empty.className = "text-xs text-slate-500 py-2 text-center bg-slate-900/40 rounded-lg";
-                empty.innerText = "No pending tasks. Hold the ESP32 button to speak an idea!";
+                empty.className = "text-xs text-slate-500 py-2.5 text-center bg-slate-900/40 rounded-lg";
+                empty.innerText = `No tasks assigned for ${dayLabel}. Use Auto-Schedule or NLP to book into this day!`;
                 container.appendChild(empty);
             } else {
                 allTasks.forEach(t => {
@@ -554,7 +585,7 @@
                 if (completed) {
                     await fetch(`/api/tasks/${taskId}/complete`, { method: 'PATCH' });
                 }
-                fetchDailySynthesis();
+                fetchDailySynthesis(currentSelectedDate);
             } catch (err) {
                 console.error("Failed to complete task:", err);
             }
