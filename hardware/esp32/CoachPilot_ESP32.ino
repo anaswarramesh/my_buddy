@@ -74,6 +74,14 @@ int meetingCount = 2;
 String starterTask = "Draft 3 value props";
 String shortNudge = "GREEN DAY: Launch ideas!";
 
+// Event List on Dashboard (right side of Load Box)
+struct OLEDEvent {
+    String time;
+    String title;
+};
+OLEDEvent oledEvents[4];
+int oledEventCount = 0;
+
 // Result Screen Data
 String resultStatus = "PROCESSED";
 String resultTask = "";
@@ -326,6 +334,19 @@ void fetchDisplayData() {
         meetingCount = doc["meeting_count"] | 0;
         shortNudge = doc["short_nudge"].as<String>();
         starterTask = doc["starter_task_title"].as<String>();
+
+        // Parse list of events for the right column
+        oledEventCount = 0;
+        if (doc["events"].is<JsonArray>()) {
+            JsonArray evArr = doc["events"].as<JsonArray>();
+            for (JsonObject ev : evArr) {
+                if (oledEventCount < 4) {
+                    oledEvents[oledEventCount].time = ev["time"].as<String>();
+                    oledEvents[oledEventCount].title = ev["title"].as<String>();
+                    oledEventCount++;
+                }
+            }
+        }
     }
     http.end();
 }
@@ -337,34 +358,50 @@ void drawDashboard() {
     display.setTextSize(1);
     display.setCursor(0, 0);
     display.print(dateStr);
-    display.setCursor(82, 0);
+    display.setCursor(84, 0);
     display.print(densityLevel);
     display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 
-    // 2. Left Column: Density Load Gauge Box
-    display.drawRoundRect(0, 13, 44, 37, 4, SSD1306_WHITE);
-    display.setCursor(5, 20);
+    // 2. Left Column: Density Load Gauge Box (40px wide, x=0..40, y=12..50)
+    display.drawRoundRect(0, 12, 40, 38, 3, SSD1306_WHITE);
+    display.setCursor(3, 17);
     display.setTextSize(2);
+    if (densityPct < 10) display.print(" ");
     display.print(densityPct);
     display.setTextSize(1);
-    display.setCursor(31, 20);
+    display.setCursor(27, 17);
     display.print("%");
-    display.setCursor(8, 38);
+    display.setCursor(8, 36);
     display.print("LOAD");
 
-    // 3. Right Column: Meetings & Actionable Starter Step
-    display.setCursor(50, 14);
-    display.print("Mtgs: ");
-    display.print(meetingCount);
+    // Divider line between load box and events list
+    display.drawLine(43, 12, 43, 50, SSD1306_WHITE);
 
-    display.setCursor(50, 26);
-    display.print("Step 1 (Micro):");
-    display.setCursor(50, 38);
-    display.print(starterTask.substring(0, 12));
+    // 3. Right Column: List of Events & Time (x=46 to 127)
+    display.setTextSize(1);
+    if (oledEventCount == 0) {
+        display.setCursor(47, 16);
+        display.print("No events");
+        display.setCursor(47, 28);
+        display.print("Clear day!");
+        display.setCursor(47, 40);
+        display.print("Focus time");
+    } else {
+        int yPos = 13;
+        for (int i = 0; i < oledEventCount && i < 3; i++) {
+            display.setCursor(47, yPos);
+            display.print(oledEvents[i].time);
+            display.print(" ");
+            // 5 chars for time ("09:30"), 1 space, up to 7 chars for title = 13 chars max
+            display.print(oledEvents[i].title.substring(0, 7));
+            yPos += 13;
+        }
+    }
 
     // 4. Bottom Ticker: Coaching Nudge
     display.drawLine(0, 52, 127, 52, SSD1306_WHITE);
     display.setCursor(0, 55);
+    display.setTextSize(1);
     display.print(shortNudge.substring(0, 21));
 
     display.display();

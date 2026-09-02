@@ -58,6 +58,14 @@ def get_hardware_display_data(user_id: str = "default-user", db: Session = Depen
             "is_scheduled": t.is_scheduled
         })
 
+    events_list = []
+    sorted_events = sorted(events, key=lambda e: e.start_time)
+    for ev in sorted_events[:4]:
+        events_list.append({
+            "time": ev.start_time.strftime("%H:%M"),
+            "title": ev.title[:14] # concise for 128px OLED screen
+        })
+
     return {
         "date_str": today.strftime("%a %b %d"),
         "density_pct": int(density_res.density_score * 100),
@@ -66,6 +74,7 @@ def get_hardware_display_data(user_id: str = "default-user", db: Session = Depen
         "short_nudge": short_nudge,
         "starter_task_title": starter_task.title[:24] if starter_task else "No pending tasks",
         "starter_task_mins": starter_task.estimated_minutes if starter_task else 0,
+        "events": events_list,
         "tasks": tasks_list
     }
 
