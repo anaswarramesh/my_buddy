@@ -14,6 +14,17 @@ class CalendarEventCreate(BaseModel):
     event_category: str = "meeting"
     cognitive_weight: float = 1.0
 
+class CalendarEventUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    location: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    is_all_day: Optional[bool] = None
+    is_fixed: Optional[bool] = None
+    event_category: Optional[str] = None
+    cognitive_weight: Optional[float] = None
+
 class CalendarEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -39,9 +39,13 @@
                     <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span class="text-slate-300">Bi-directional Sync: Google & CalDAV Active</span>
                 </div>
+                <button onclick="clearDemoData()" class="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 text-xs rounded-lg border border-rose-800 flex items-center space-x-1.5 transition" title="Clear demo mock data">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    <span>Clear Demo Events</span>
+                </button>
                 <button onclick="seedDemoData()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg border border-slate-700 flex items-center space-x-1.5 transition">
                     <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-                    <span>Reset Demo Calendar</span>
+                    <span>Load Demo Data</span>
                 </button>
             </div>
         </div>
@@ -512,8 +516,22 @@
 
             // Section 1: Calendar Appointments (Determines % Load)
             const eventsHeader = document.createElement('div');
-            eventsHeader.className = "flex items-center justify-between text-xs font-semibold text-slate-300 pb-1";
-            eventsHeader.innerHTML = `<span class="flex items-center space-x-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-400"></i><span>Calendar Commitments for ${dayLabel} (${events.length})</span></span><span class="text-[10px] text-slate-400 font-normal">Calculates % Load</span>`;
+            eventsHeader.className = "flex items-center justify-between text-xs font-semibold text-slate-300 pb-2";
+            eventsHeader.innerHTML = `
+                <span class="flex items-center space-x-1.5">
+                    <i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-400"></i>
+                    <span>Calendar Commitments for ${dayLabel} (${events.length})</span>
+                </span>
+                <div class="flex items-center space-x-1.5">
+                    <button onclick="openAddEventModal()" class="text-[10px] px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium transition flex items-center space-x-1 shadow">
+                        <i data-lucide="plus" class="w-2.5 h-2.5"></i>
+                        <span>+ Add Event</span>
+                    </button>
+                    <button onclick="clearDemoData()" title="Remove demo mock data" class="text-[10px] px-2 py-0.5 bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-300 rounded border border-slate-700 hover:border-rose-800 transition">
+                        <span>Clear Demo</span>
+                    </button>
+                </div>
+            `;
             container.appendChild(eventsHeader);
 
             if (events.length === 0) {
@@ -526,20 +544,39 @@
                     const s = new Date(ev.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     const e = new Date(ev.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     const isTask = ev.event_category === 'ai_starter_task';
+                    const isGoogle = ev.event_category === 'google_calendar' || (ev.external_event_id && ev.external_event_id.length > 0);
+
+                    let categoryLabel = '🎭 Demo / Mock Meeting';
+                    let categoryColor = 'text-amber-400/90';
+                    if (isGoogle) {
+                        categoryLabel = '📅 Google Calendar';
+                        categoryColor = 'text-blue-400';
+                    } else if (isTask) {
+                        categoryLabel = '⚡ AI Ignition Block';
+                        categoryColor = 'text-indigo-300';
+                    }
 
                     const item = document.createElement('div');
-                    item.className = `p-3 rounded-xl border ${isTask ? 'bg-indigo-950/40 border-indigo-500/50' : 'bg-slate-900/90 border-slate-800'} flex items-center justify-between mb-2`;
+                    item.className = `p-3 rounded-xl border ${isTask ? 'bg-indigo-950/40 border-indigo-500/50' : 'bg-slate-900/90 border-slate-800'} flex items-center justify-between mb-2 hover:border-slate-700 transition`;
                     item.innerHTML = `
                         <div class="flex items-center space-x-3">
                             <span class="text-xs font-mono text-slate-400 font-medium">${s} - ${e}</span>
                             <div>
                                 <p class="text-xs font-semibold ${isTask ? 'text-indigo-300' : 'text-white'}">${ev.title}</p>
-                                <p class="text-[10px] text-slate-400">${isTask ? '⚡ AI Ignition Block' : 'Google Calendar Event'}</p>
+                                <p class="text-[10px] ${categoryColor}">${categoryLabel}</p>
                             </div>
                         </div>
-                        <span class="text-[10px] px-2 py-0.5 rounded font-medium ${ev.cognitive_weight > 1.2 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-slate-800 text-slate-400'}">
-                            ${ev.cognitive_weight > 1.2 ? 'High Load (1.5x)' : 'Standard (1.0x)'}
-                        </span>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-[10px] px-2 py-0.5 rounded font-medium ${ev.cognitive_weight > 1.2 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-slate-800 text-slate-400'}">
+                                ${ev.cognitive_weight > 1.2 ? 'High Load (1.5x)' : 'Standard (1.0x)'}
+                            </span>
+                            <button onclick="editEvent('${ev.id}', '${encodeURIComponent(ev.title)}', ${ev.cognitive_weight})" title="Edit Event Title/Load" class="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition">
+                                <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                            </button>
+                            <button onclick="deleteEvent('${ev.id}')" title="Delete Event" class="p-1 text-slate-400 hover:text-rose-400 rounded hover:bg-slate-800 transition">
+                                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
                     `;
                     container.appendChild(item);
                 });
@@ -619,6 +656,96 @@
                 fetchDailySynthesis(currentSelectedDate);
             } catch (err) {
                 console.error("Failed to complete task:", err);
+            }
+        }
+
+        async function deleteEvent(eventId) {
+            if (!confirm("Delete this calendar event?")) return;
+            try {
+                const res = await fetch(`/api/calendar/events/${eventId}`, { method: 'DELETE' });
+                if (res.ok) {
+                    await fetchDailySynthesis(currentSelectedDate);
+                    fetchDensityForecast();
+                } else {
+                    alert("Failed to delete event.");
+                }
+            } catch (e) {
+                console.error("Delete event failed:", e);
+            }
+        }
+
+        async function editEvent(eventId, encodedTitle, currentWeight) {
+            const currentTitle = decodeURIComponent(encodedTitle);
+            const newTitle = prompt("Edit Event Title:", currentTitle);
+            if (!newTitle || newTitle.trim() === "") return;
+
+            const newWeightStr = prompt("Cognitive Load (1.0 = Standard, 1.5 = High Load, 0.6 = Light):", currentWeight);
+            const newWeight = parseFloat(newWeightStr) || currentWeight;
+
+            try {
+                const res = await fetch(`/api/calendar/events/${eventId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: newTitle.trim(), cognitive_weight: newWeight })
+                });
+                if (res.ok) {
+                    await fetchDailySynthesis(currentSelectedDate);
+                    fetchDensityForecast();
+                } else {
+                    alert("Failed to update event.");
+                }
+            } catch (e) {
+                console.error("Edit event failed:", e);
+            }
+        }
+
+        async function clearDemoData() {
+            if (!confirm("Clear all demo/mock meetings? Your real Google Calendar events will remain intact.")) return;
+            try {
+                const res = await fetch('/api/calendar/clear-demo', { method: 'DELETE' });
+                const data = await res.json();
+                alert(data.message || "Demo events cleared!");
+                await fetchDailySynthesis(currentSelectedDate);
+                fetchDensityForecast();
+            } catch (e) {
+                console.error("Failed to clear demo data:", e);
+            }
+        }
+
+        async function openAddEventModal() {
+            const title = prompt(`Add Event for ${currentSelectedDate}:\nEnter Title:`);
+            if (!title || !title.trim()) return;
+
+            const timeRange = prompt("Enter Start - End time in 24h format (e.g. 10:00 - 11:30):", "10:00 - 11:00");
+            if (!timeRange || !timeRange.includes("-")) return;
+
+            const [startStr, endStr] = timeRange.split("-").map(s => s.trim());
+            const startDt = `${currentSelectedDate}T${startStr}:00`;
+            const endDt = `${currentSelectedDate}T${endStr}:00`;
+
+            const weightStr = prompt("Cognitive Load (1.0 = Standard, 1.5 = High Load):", "1.0");
+            const weight = parseFloat(weightStr) || 1.0;
+
+            try {
+                const res = await fetch('/api/calendar/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: title.trim(),
+                        start_time: startDt,
+                        end_time: endDt,
+                        cognitive_weight: weight,
+                        event_category: 'manual_meeting'
+                    })
+                });
+                if (res.ok) {
+                    await fetchDailySynthesis(currentSelectedDate);
+                    fetchDensityForecast();
+                } else {
+                    alert("Failed to add event. Please verify time format (e.g. 10:00 - 11:00).");
+                }
+            } catch (e) {
+                console.error("Add event failed:", e);
             }
         }
 

@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import date, timedelta
 from app.database import get_db
 from app.models.calendar import CalendarEvent
-from app.schemas.calendar import CalendarEventResponse, CalendarEventCreate, CalendarSyncResponse
+from app.schemas.calendar import CalendarEventResponse, CalendarEventCreate, CalendarEventUpdate, CalendarSyncResponse
 from app.schemas.density import DailyDensityResponse, MultiDayDensityResponse
 from app.services.calendar_service import CalendarService
 from app.services.density_service import DensityService
@@ -40,6 +40,42 @@ def create_event(payload: CalendarEventCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(ev)
     return ev
+
+@router.patch("/events/{event_id}", response_model=CalendarEventResponse)
+def update_event(event_id: str, payload: CalendarEventUpdate, db: Session = Depends(get_db)):
+    ev = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Calendar event not found")
+    
+    for field, val in payload.model_dump(exclude_unset=True).items():
+        setattr(ev, field, val)
+    
+    db.commit()
+    db.refresh(ev)
+    return ev
+
+@router.delete("/events/{event_id}")
+def delete_event(event_id: str, db: Session = Depends(get_db)):
+    ev = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Calendar event not found")
+    
+    db.delete(ev)
+    db.commit()
+    return {"status": "deleted", "id": event_id}
+
+@router.delete("/clear-demo")
+def clear_demo_events(user_id: str = "default-user", db: Session = Depends(get_db)):
+    """
+    Clears all seeded demo events, preserving real Google Calendar events and AI scheduled tasks.
+    """
+    count = db.query(CalendarEvent).filter(
+        CalendarEvent.user_id == user_id,
+        CalendarEvent.external_event_id == None,
+        CalendarEvent.event_category != "ai_starter_task"
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "cleared", "deleted_count": count, "message": f"Cleared {count} demo events."}
 
 @router.get("/density", response_model=MultiDayDensityResponse)
 def get_density_overview(

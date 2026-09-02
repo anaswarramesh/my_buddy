@@ -215,12 +215,13 @@ class CalendarService:
                 if not existing:
                     ev = CalendarEvent(
                         user_id=user_id,
+                        external_event_id=item.get("id"),
                         title=title,
                         description=item.get("description", ""),
                         location=item.get("location", ""),
                         start_time=start_dt.replace(tzinfo=None),
                         end_time=end_dt.replace(tzinfo=None),
-                        event_category="meeting",
+                        event_category="google_calendar",
                         cognitive_weight=1.0,
                         is_fixed=True
                     )
