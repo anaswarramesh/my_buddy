@@ -24,7 +24,7 @@ class WhisperService:
             try:
                 import httpx
                 encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
-                models_to_try = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
+                models_to_try = ["gemini-3.6-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash"]
                 
                 payload = {
                     "contents": [
