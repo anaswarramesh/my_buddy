@@ -325,22 +325,26 @@ $$D(d) = \min\left(1.0, \frac{\sum_{i=1}^{N} (T_{i} \times W_{i}) + (N \times C_
 
 ### Complete Pin Assignment Table
 
-| Module | Pin | Waveshare ESP32-S3 Mini Pin | Logic Level | Description |
+| Module / Component | Pin / Terminal | Connects To (Waveshare ESP32-S3 Mini) | Logic / Electrical Level | Description & Wiring Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V | Display Power |
-| | **GND** | **GND** | 0V | Ground |
-| | **SDA** | **GPIO 8** | 3.3V | Hardware I2C SDA |
-| | **SCL** | **GPIO 9** | 3.3V | Hardware I2C SCL |
-| **INMP441 I2S Mic** | **VDD** | **3V3** | 3.3V | Digital Mic Power |
-| | **GND** | **GND** | 0V | Ground |
-| | **L/R** | **GND** | 0V | Left Channel Select |
-| | **SD** | **GPIO 1** | 3.3V | I2S Serial Data Out |
-| | **WS** | **GPIO 2** | 3.3V | I2S Word Select / LR Clock |
-| | **SCK** | **GPIO 3** | 3.3V | I2S Bit Clock |
-| **Push-to-Talk Button (TS1215CJ)** | **Pin 1** | **GPIO 6** | Active LOW | Input Pull-up (`INPUT_PULLUP`) |
-| | **Pin 2** | **GND** | 0V | Ground |
-| **Status LED** | **Anode (+)** | **GPIO 10** (or built-in RGB on **GPIO 21**) | 3.3V | Active HIGH when recording |
-| | **Cathode (-)**| **GND** | Ground |
+| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V DC | Display logic & power supply |
+| | **GND** | **GND** | 0V | Common circuit ground |
+| | **SDA** | **GPIO 8** | 3.3V I2C Data | Hardware I2C Serial Data line |
+| | **SCL** | **GPIO 9** | 3.3V I2C Clock | Hardware I2C Serial Clock line |
+| **INMP441 I2S Mic** | **VDD** | **3V3** | 3.3V DC | Digital microphone power |
+| | **GND** | **GND** | 0V | Common circuit ground |
+| | **L/R** | **GND** | 0V (GND) | Left Audio Channel Select |
+| | **SD** | **GPIO 1** | 3.3V I2S Data | I2S Serial Data Out (to ESP32) |
+| | **WS** | **GPIO 2** | 3.3V I2S Clock | Word Select / LR Frame Clock |
+| | **SCK** | **GPIO 3** | 3.3V I2S Clock | Bit Clock Line |
+| **TS1215CJ Push Button** | **Pin 1 (or 2)** | **GPIO 6** | Active LOW | Push-to-Talk input (internal `INPUT_PULLUP`) |
+| | **Pin 4 (or 3)** | **GND** | 0V | Connects to Ground (closes on press) |
+| **220Ω Resistor** | **Lead 1** | **GPIO 10** | 3.3V Output | In-series current-limiting resistor for LED |
+| | **Lead 2** | **Status LED Anode (+)** | Forward Current | Connects directly to positive leg of LED |
+| **Status LED (External)** | **Anode (+)** | **220Ω Resistor Lead 2** | Current limited | Longer leg of external LED |
+| | **Cathode (-)**| **GND** | 0V | Shorter leg of external LED to Ground |
+| **WS2812 RGB (Onboard)** | **Data In** | **GPIO 21 (Internal)** | 3.3V Logic | Built-in RGB on Waveshare board (no external resistor needed) |
+
 
 ---
 

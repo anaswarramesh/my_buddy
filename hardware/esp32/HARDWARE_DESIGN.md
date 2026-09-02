@@ -24,7 +24,7 @@ This document contains the complete engineering specification for building the *
                                  ▼
  ┌─────────────────────────────────────────────────────────────────┐
  │       24/7 CLOUD-HOSTED BACKEND (No Laptop Needed)              │
- │                                                                 │
+ │                                                         │
  │  ┌──────────────────┐  ┌─────────────────────────────────────┐  │
  │  │  FastAPI Backend │  │   Supabase / SQLite DB              │  │
  │  └────────▲─────────┘  └──────────────▲──────────────────────┘  │
@@ -46,10 +46,10 @@ This document contains the complete engineering specification for building the *
 | **Display** | **0.96" or 1.3" I2C OLED Display** | SSD1306 or SH1106 driver, 128x64 resolution, 3.3V | \$2.00 – \$3.00 |
 | **Microphone** | **INMP441 I2S Omnidirectional Mic** | 24-bit digital output, SNR 61 dBA, low-noise bottom port | \$1.20 – \$2.00 |
 | **Button** | **TS1215CJ 12x12mm Tactile Push Switch** | 250gf actuation force, 15mm height, 100,000 cycles | \$0.20 |
-| **LED Indicator** | **On-board WS2812 RGB LED (GPIO 21)** or external 3mm Blue LED | Recording / Processing status indicator | Included on board |
-| **Resistor** | **220Ω 1/4W Resistor** (only if using external LED) | Current-limiting resistor | \$0.05 |
+| **Resistor** | **220Ω 1/4W Carbon/Metal Film Resistor** | In-series current limiter for external Status LED | \$0.05 |
+| **LED Indicator** | **3mm / 5mm Diffused Blue or Red LED** | External Recording Indicator (or use onboard WS2812 RGB on GPIO 21) | \$0.10 |
 | **Power Supply** | **USB-C Cable & 5V/1A Wall Adapter** | Continuous desk power (or 3.7V LiPo battery) | \$2.00 |
-| **Total BOM** | | | **\$9.40 – \$12.50** |
+| **Total BOM** | | | **\$9.45 – \$12.55** |
 
 ---
 
@@ -81,22 +81,25 @@ This document contains the complete engineering specification for building the *
 
 ### Complete Pin Assignment Table
 
-| Module | Pin Name | Waveshare ESP32-S3 Mini Pin | Logic Level | Description |
+| Module / Component | Pin / Terminal | Connects To (Waveshare ESP32-S3 Mini) | Logic / Electrical Level | Description & Wiring Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V | Display Power |
-| | **GND** | **GND** | 0V | Ground |
-| | **SDA** | **GPIO 8** | 3.3V I2C Data | Hardware I2C SDA |
-| | **SCL** | **GPIO 9** | 3.3V I2C Clock | Hardware I2C SCL |
-| **INMP441 I2S Mic** | **VDD** | **3V3** | 3.3V | Digital Mic Power |
-| | **GND** | **GND** | 0V | Ground |
-| | **L/R** | **GND** | 0V | Left Audio Channel Select |
-| | **SD** | **GPIO 1** | 3.3V I2S Data | I2S Serial Data Out |
-| | **WS** | **GPIO 2** | 3.3V I2S Clock | Word Select / LR Clock |
+| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V DC | Display logic & power supply |
+| | **GND** | **GND** | 0V | Common circuit ground |
+| | **SDA** | **GPIO 8** | 3.3V I2C Data | Hardware I2C Serial Data line |
+| | **SCL** | **GPIO 9** | 3.3V I2C Clock | Hardware I2C Serial Clock line |
+| **INMP441 I2S Mic** | **VDD** | **3V3** | 3.3V DC | Digital mic power |
+| | **GND** | **GND** | 0V | Common circuit ground |
+| | **L/R** | **GND** | 0V (GND) | Left Audio Channel Select |
+| | **SD** | **GPIO 1** | 3.3V I2S Data | I2S Serial Data Out (to ESP32) |
+| | **WS** | **GPIO 2** | 3.3V I2S Clock | Word Select / LR Frame Clock |
 | | **SCK** | **GPIO 3** | 3.3V I2S Clock | Bit Clock Line |
-| **Push-to-Talk Button (TS1215CJ)** | **Pin 1** | **GPIO 6** | Active LOW | Input Pull-up Button (`INPUT_PULLUP`) |
-| | **Pin 2** | **GND** | 0V | Ground |
-| **Status LED** | **Anode (+)** | **GPIO 10** (or built-in RGB on **GPIO 21**) | 3.3V | Active HIGH when recording |
-| | **Cathode (-)**| **GND** | 0V | Ground |
+| **TS1215CJ Push Button** | **Pin 1 (or 2)** | **GPIO 6** | Active LOW | Push-to-Talk input (internal `INPUT_PULLUP`) |
+| | **Pin 4 (or 3)** | **GND** | 0V | Connects to Ground (closes on press) |
+| **220Ω Resistor** | **Lead 1** | **GPIO 10** | 3.3V Output | In-series current-limiting resistor for LED |
+| | **Lead 2** | **Status LED Anode (+)** | Forward Current | Connects directly to positive leg of LED |
+| **Status LED (External)** | **Anode (+)** | **220Ω Resistor Lead 2** | Current limited | Longer leg of external LED |
+| | **Cathode (-)**| **GND** | 0V | Shorter leg of external LED to Ground |
+| **WS2812 RGB (Onboard)** | **Data In** | **GPIO 21 (Internal)** | 3.3V Logic | Built-in RGB on Waveshare board (no resistor needed) |
 
 ---
 

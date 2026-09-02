@@ -8,12 +8,14 @@ This wiring schematic is tailored specifically for the **Waveshare ESP32-S3 Mini
 1. **Waveshare ESP32-S3 Mini / Zero** (ESP32-S3FH4R2)
 2. **0.96" or 1.3" I2C OLED Display** (SSD1306 / SH1106, 128x64)
 3. **INMP441 I2S Omnidirectional Digital Microphone Module**
-4. **Tactile Push Button** (Push-to-Talk)
-5. **Jumper Wires & Breadboard** (or custom PCB)
+4. **TS1215CJ 12x12mm Tactile Push Button** (4-pin Plugin)
+5. **220Ω Current-Limiting Resistor** (1/4W, for external Status LED)
+6. **3mm / 5mm Blue or Red Status LED** (optional if using onboard RGB on GPIO 21)
+7. **Jumper Wires & Breadboard** (or custom PCB)
 
 ---
 
-## 🔌 Pinout Connection Table
+## 🔌 Circuit Schematic & Wiring Diagram
 
 ```
    ┌────────────────────────────────────────────────────────────┐
@@ -39,24 +41,29 @@ This wiring schematic is tailored specifically for the **Waveshare ESP32-S3 Mini
    └────────────────────────────────────────────────────────────┘
 ```
 
-### Detailed Pin Assignments
+---
 
-| Module | Pin Name | Waveshare ESP32-S3 Pin | Description |
-| :--- | :--- | :--- | :--- |
-| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V Power |
-| | **GND** | **GND** | Ground |
-| | **SDA** | **GPIO 8** | I2C Serial Data |
-| | **SCL** | **GPIO 9** | I2C Serial Clock |
-| **INMP441 I2S Digital Mic** | **VDD** | **3V3** | 3.3V Power |
-| | **GND** | **GND** | Ground |
-| | **L/R** | **GND** | Left Channel Audio Select |
-| | **SD** | **GPIO 1** | I2S Serial Data In |
-| | **WS** | **GPIO 2** | I2S Word Select / LRCLK |
-| | **SCK** | **GPIO 3** | I2S Continuous Serial Clock |
-| **Push-to-Talk Button** | **Pin 1** | **GPIO 6** | Configured with internal `INPUT_PULLUP` |
-| | **Pin 2** | **GND** | Ground (pressing pulls LOW) |
-| **Status LED** | **Anode (+)** | **GPIO 10** (or onboard RGB **GPIO 21**) | Active HIGH during recording |
-| | **Cathode (-)**| **GND** | Ground |
+## 📋 Complete Pin Assignment Table
+
+| Module / Component | Pin / Terminal | Connects To (Waveshare ESP32-S3 Mini) | Logic / Electrical Level | Description & Wiring Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V DC | Power supply for display |
+| | **GND** | **GND** | 0V | Common ground |
+| | **SDA** | **GPIO 8** | 3.3V I2C Data | Hardware I2C Serial Data |
+| | **SCL** | **GPIO 9** | 3.3V I2C Clock | Hardware I2C Serial Clock |
+| **INMP441 I2S Digital Mic** | **VDD** | **3V3** | 3.3V DC | Digital microphone power |
+| | **GND** | **GND** | 0V | Common ground |
+| | **L/R** | **GND** | 0V (GND) | Pull to GND for Left Channel audio |
+| | **SD** | **GPIO 1** | 3.3V I2S Data | I2S Serial Data Out (to ESP32) |
+| | **WS** | **GPIO 2** | 3.3V I2S Clock | Word Select / Frame LRCLK |
+| | **SCK** | **GPIO 3** | 3.3V I2S Clock | Continuous Serial Bit Clock |
+| **TS1215CJ Push Button** | **Pin 1 (or 2)** | **GPIO 6** | Active LOW | Push-to-Talk input (firmware uses `INPUT_PULLUP`) |
+| | **Pin 4 (or 3)** | **GND** | 0V | Ground connection (press closes circuit to GND) |
+| **220Ω Resistor** | **Lead 1** | **GPIO 10** | 3.3V Output | In-series current-limiting resistor for LED |
+| | **Lead 2** | **Status LED Anode (+)** | Forward Voltage | Connects directly to LED positive leg |
+| **Status LED (External)** | **Anode (+)** | **220Ω Resistor Lead 2** | Current limited | Longer leg of LED |
+| | **Cathode (-)**| **GND** | 0V | Shorter leg of LED connects to Ground |
+| **WS2812 RGB LED (Onboard)** | **Data In** | **GPIO 21 (Internal)** | 3.3V Logic | Built-in RGB on Waveshare board (no external resistor needed) |
 
 ---
 
