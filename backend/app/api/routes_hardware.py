@@ -77,14 +77,15 @@ async def handle_hardware_voice_upload(
     Accepts raw binary audio stream (WAV/PCM) recorded from ESP32 I2S microphone (INMP441)
     or Raspberry Pi USB/I2S mic. Runs Whisper + Prompt A/B/C and returns instant OLED status.
     """
-    body = await request.body()
-    if not body or len(body) < 100:
-        raise HTTPException(status_code=400, detail="Audio buffer empty or too short.")
+    try:
+        body = await request.body()
+        if not body or len(body) < 100:
+            raise HTTPException(status_code=400, detail="Audio buffer empty or too short.")
 
-    # Transcribe via Whisper
-    transcript = await WhisperService.transcribe_audio(audio_bytes=body)
-    if not transcript:
-        transcript = "I want to build an automated AI client intake system that summarizes legal inquiries."
+        # Transcribe via Whisper
+        transcript = await WhisperService.transcribe_audio(audio_bytes=body)
+        if not transcript:
+            transcript = "I want to build an automated AI client intake system that summarizes legal inquiries."
 
     # Run Cognitive Triage (Prompt A)
     user = db.query(User).filter(User.id == user_id).first()
@@ -195,14 +196,15 @@ async def handle_hardware_voice_upload(
             density_snapshots=snapshots,
             existing_tasks=tasks_dicts
         )
-        action_label = "CALENDAR SHIFTED"
-        target_task_title = nlp_res.nlp_summary[:24]
-
-    # Return compact feedback for OLED screen
-    return {
-        "status": "success",
-        "action_label": action_label,
-        "transcript": transcript[:40],
-        "starter_task": target_task_title[:24] if target_task_title else "Action captured",
-        "feasibility": result.idea_analysis.feasibility_score if result.idea_analysis else None
-    }
+        # Return compact feedback for OLED screen
+        return {
+            "status": "success",
+            "action_label": action_label,
+            "transcript": transcript[:40],
+            "starter_task": target_task_title[:24] if target_task_title else "Action captured",
+            "feasibility": result.idea_analysis.feasibility_score if result.idea_analysis else None
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Voice upload failed: {type(e).__name__}: {str(e)}")

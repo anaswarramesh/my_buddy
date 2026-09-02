@@ -13,6 +13,7 @@
  */
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -255,9 +256,11 @@ void uploadAudio() {
     writeWavHeader(audioBuffer, recordedBytes, SAMPLE_RATE, 1, 16);
 
     if (WiFi.status() == WL_CONNECTED) {
+        WiFiClientSecure client;
+        client.setInsecure(); // Skip certificate verification for cloud server
         HTTPClient http;
         String url = String(SERVER_BASE) + "/api/hardware/voice-upload";
-        http.begin(url);
+        http.begin(client, url);
         http.addHeader("Content-Type", "audio/wav");
         http.setTimeout(15000); // 15-second timeout for LLM inference
 
@@ -287,9 +290,11 @@ void uploadAudio() {
 void fetchDisplayData() {
     if (WiFi.status() != WL_CONNECTED) return;
 
+    WiFiClientSecure client;
+    client.setInsecure();
     HTTPClient http;
     String url = String(SERVER_BASE) + "/api/hardware/display-data";
-    http.begin(url);
+    http.begin(client, url);
     http.setTimeout(5000);
     int httpCode = http.GET();
     if (httpCode == 200) {
