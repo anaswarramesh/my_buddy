@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from datetime import date
+from typing import List, Optional
 from app.database import get_db
 from app.models.task import Task
 from app.schemas.task import TaskResponse, TaskCreate, TaskScheduleRequest
@@ -33,17 +34,22 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
     return task
 
 @router.post("/{task_id}/auto-schedule", response_model=TaskResponse)
-def auto_schedule_task_endpoint(task_id: str, db: Session = Depends(get_db)):
+def auto_schedule_task_endpoint(
+    task_id: str,
+    target_date: Optional[date] = None,
+    db: Session = Depends(get_db)
+):
     """
     Invokes Smart Scheduler to automatically match task with optimal Green/Light focus window.
+    If target_date is supplied, schedules specifically for that date.
     """
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    event = SchedulerService.auto_schedule_task(db, task.user_id, task)
+    event = SchedulerService.auto_schedule_task(db, task.user_id, task, target_date=target_date)
     if not event:
-        raise HTTPException(status_code=400, detail="No suitable low-density focus window found in the next 7 days.")
+        raise HTTPException(status_code=400, detail="No suitable low-density focus window found.")
 
     return task
 

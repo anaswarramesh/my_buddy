@@ -13,22 +13,24 @@ class SchedulerService:
         db: Session,
         user_id: str,
         task: Task,
-        search_days: int = 7
+        search_days: int = 7,
+        target_date: Optional[date] = None
     ) -> Optional[CalendarEvent]:
         """
         Finds the optimal low-density 'Green Day' focus window for the task,
         creates a CalendarEvent block, and binds the task to it.
+        If target_date is supplied, schedules directly into that specific day.
         """
         today = date.today()
+        dates_to_check = [target_date] if target_date else [today + timedelta(days=offset) for offset in range(search_days)]
         
-        # Scan upcoming days
-        for offset in range(search_days):
-            target_date = today + timedelta(days=offset)
-            events = CalendarService.get_events_for_range(db, user_id, target_date, target_date)
-            density_res = DensityService.calculate_day_density(target_date, events)
+        # Scan days
+        for cur_date in dates_to_check:
+            events = CalendarService.get_events_for_range(db, user_id, cur_date, cur_date)
+            density_res = DensityService.calculate_day_density(cur_date, events)
 
-            # Rule: Don't schedule into dense/overloaded days
-            if density_res.density_score > 0.70:
+            # Rule: Don't schedule into overloaded days unless explicitly requested
+            if not target_date and density_res.density_score > 0.70:
                 continue
 
             # Look for an available focus window with sufficient duration

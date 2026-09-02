@@ -40,23 +40,23 @@ def get_daily_synthesis(
         Task.scheduled_start <= end_dt
     ).all()
 
-    if selected_date == today:
+    # If tasks are specifically scheduled for this date, show them
+    if scheduled_for_date:
+        starter_tasks = [t for t in scheduled_for_date if t.is_starter_step]
+        other_tasks = [t for t in scheduled_for_date if not t.is_starter_step]
+    else:
+        # Always return active tasks from backlog so tasks are visible and schedule-able for any clicked day
         starter_tasks = db.query(Task).filter(
             Task.user_id == user_id,
             Task.status.in_(["pending", "scheduled"]),
             Task.is_starter_step == True
         ).limit(5).all()
 
-        other_tasks = [t for t in scheduled_for_date if not t.is_starter_step]
-        if not other_tasks:
-            other_tasks = db.query(Task).filter(
-                Task.user_id == user_id,
-                Task.status.in_(["pending", "scheduled"]),
-                Task.is_starter_step == False
-            ).limit(3).all()
-    else:
-        starter_tasks = [t for t in scheduled_for_date if t.is_starter_step]
-        other_tasks = [t for t in scheduled_for_date if not t.is_starter_step]
+        other_tasks = db.query(Task).filter(
+            Task.user_id == user_id,
+            Task.status.in_(["pending", "scheduled"]),
+            Task.is_starter_step == False
+        ).limit(3).all()
 
 
     # Dynamic Coaching Nudge based on density
