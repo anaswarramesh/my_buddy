@@ -11,9 +11,17 @@ class Settings(BaseModel):
     
     # LLM Settings
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+    gemini_api_key: str = (
+        os.getenv("GEMINI_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+        or os.getenv("GEMINI")
+        or ""
+    )
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
-    llm_provider: str = os.getenv("LLM_PROVIDER", "simulation")
+    llm_provider: str = os.getenv(
+        "LLM_PROVIDER",
+        "gemini" if (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI")) else "simulation"
+    )
     
     # Productivity Rules
     work_day_start_hour: int = 9  # 9:00 AM
