@@ -9,11 +9,13 @@ from app.database import get_db
 from app.models.task import Task
 from app.models.idea import Idea
 from app.models.user import User
+from app.models.calendar import CalendarEvent
 from app.services.calendar_service import CalendarService
 from app.services.density_service import DensityService
 from app.services.whisper_service import WhisperService
 from app.services.llm_service import LLMService
 from app.services.scheduler_service import SchedulerService
+from app.services.event_parser import EventParserService
 
 router = APIRouter(prefix="/api/hardware", tags=["Hardware IoT Display & Voice"])
 
@@ -82,120 +84,163 @@ async def handle_hardware_voice_upload(
         if not body or len(body) < 100:
             raise HTTPException(status_code=400, detail="Audio buffer empty or too short.")
 
-        # Transcribe via Whisper
+        # Transcribe via Whisper / Gemini
         transcript = await WhisperService.transcribe_audio(audio_bytes=body)
         if not transcript:
             transcript = "I want to build an automated AI client intake system that summarizes legal inquiries."
 
-    # Run Cognitive Triage (Prompt A)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        user = User(id=user_id, email="builder@coachpilot.ai", full_name="Alex Builder")
-        db.add(user)
-        db.commit()
-
-    result = await LLMService.classify_and_coach(
-        transcript=transcript,
-        user_timezone=user.timezone,
-        coaching_persona=user.coaching_style
-    )
-
-    action_label = ""
-    target_task_title = ""
-
-    if result.classification in ["BIG_IDEA", "HYBRID"] and result.idea_analysis:
-        idea_db = Idea(
-            user_id=user.id,
-            raw_transcript=transcript,
-            title=result.idea_analysis.title,
-            summary=result.idea_analysis.summary,
-            category=result.idea_analysis.category,
-            feasibility_score=result.idea_analysis.feasibility_score,
-            impact_score=result.idea_analysis.impact_score,
-            friction_score=result.idea_analysis.friction_score,
-            coaching_verdict=result.idea_analysis.coaching_verdict,
-            primary_obstacle=result.idea_analysis.primary_obstacle,
-            nudge_strategy=result.idea_analysis.nudge_strategy,
-            status="active_coaching"
-        )
-        db.add(idea_db)
-        db.flush()
-
-        decomposed_tasks = await LLMService.decompose_idea(
-            idea_title=idea_db.title,
-            idea_summary=idea_db.summary,
-            coaching_verdict=idea_db.coaching_verdict,
-            primary_obstacle=idea_db.primary_obstacle
-        )
-
-        for t in decomposed_tasks:
-            task_db = Task(
-                user_id=user.id,
-                idea_id=idea_db.id,
-                title=t.title,
-                description=t.description,
-                is_starter_step=t.is_starter_step,
-                sequence_order=t.sequence_order,
-                estimated_minutes=t.estimated_minutes,
-                friction_level=t.friction_level,
-                energy_requirement=t.energy_requirement,
-                priority=t.priority
-            )
-            db.add(task_db)
-            if t.is_starter_step:
-                target_task_title = t.title
-
-        db.commit()
-
-        # Automatically schedule Step 1 ignition action into the next open focus window!
-        starter_db_task = db.query(Task).filter(Task.idea_id == idea_db.id, Task.is_starter_step == True).first()
-        if starter_db_task:
-            cal_event = SchedulerService.auto_schedule_task(db, user.id, starter_db_task)
-            if cal_event:
-                target_task_title = f"{cal_event.start_time.strftime('%H:%M')} {starter_db_task.title}"
-
-        action_label = f"IDEA: {result.idea_analysis.feasibility_score}% Feasible"
-
-    elif result.classification == "IMMEDIATE_TASK":
-        for t in result.extracted_tasks:
-            task_db = Task(
-                user_id=user.id,
-                title=t.title,
-                estimated_minutes=t.estimated_minutes,
-                friction_level=t.friction_level,
-                energy_requirement=t.energy_requirement,
-                priority=t.priority,
-                status="pending"
-            )
-            db.add(task_db)
+        # Ensure user exists
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            user = User(id=user_id, email="builder@coachpilot.ai", full_name="Alex Builder")
+            db.add(user)
             db.commit()
-            db.refresh(task_db)
 
-            # Auto-schedule task into calendar
-            cal_event = SchedulerService.auto_schedule_task(db, user.id, task_db)
-            if cal_event:
-                target_task_title = f"{cal_event.start_time.strftime('%H:%M')} {task_db.title}"
-            else:
-                target_task_title = task_db.title
-        action_label = "TASK BOOKED"
+        # 1. Check if voice audio specifies an explicit meeting / appointment
+        parsed_event = EventParserService.parse_event_from_text(transcript)
+        if parsed_event:
+            cal_event = CalendarEvent(
+                user_id=user.id,
+                title=parsed_event["title"],
+                start_time=parsed_event["start_dt"],
+                end_time=parsed_event["end_dt"],
+                is_fixed=True,
+                event_category="voice_meeting",
+                cognitive_weight=parsed_event["cognitive_weight"]
+            )
+            db.add(cal_event)
+            db.commit()
+            db.refresh(cal_event)
 
-    elif result.classification == "CALENDAR_COMMAND":
-        today = date.today()
-        snapshots = []
-        for offset in range(7):
-            cur_date = today + timedelta(days=offset)
-            events = CalendarService.get_events_for_range(db, user.id, cur_date, cur_date)
-            d_res = DensityService.calculate_day_density(cur_date, events)
-            snapshots.append(d_res.model_dump())
+            # Sync to Google Calendar if connected
+            google_token = await CalendarService.get_valid_google_token(db, user.id)
+            if google_token:
+                try:
+                    await CalendarService.create_google_event(
+                        access_token=google_token,
+                        title=cal_event.title,
+                        start_time=cal_event.start_time,
+                        end_time=cal_event.end_time,
+                        description="Scheduled via CoachPilot ESP32 Voice"
+                    )
+                except Exception as e:
+                    print(f"[Google Calendar] Hardware voice sync failed: {e}")
 
-        tasks = db.query(Task).filter(Task.user_id == user.id, Task.status != "completed").limit(5).all()
-        tasks_dicts = [{"id": t.id, "title": t.title, "friction": t.friction_level} for t in tasks]
+            time_str = cal_event.start_time.strftime("%H:%M")
+            return {
+                "status": "success",
+                "action_label": f"MTG: {time_str}",
+                "transcript": transcript[:40],
+                "starter_task": f"{time_str} {cal_event.title}"[:24],
+                "feasibility": None
+            }
 
-        nlp_res = await LLMService.analyze_density_and_nlp(
-            command=transcript,
-            density_snapshots=snapshots,
-            existing_tasks=tasks_dicts
+        result = await LLMService.classify_and_coach(
+            transcript=transcript,
+            user_timezone=user.timezone,
+            coaching_persona=user.coaching_style
         )
+
+        action_label = ""
+        target_task_title = ""
+
+        if result.classification in ["BIG_IDEA", "HYBRID"] and result.idea_analysis:
+            idea_db = Idea(
+                user_id=user.id,
+                raw_transcript=transcript,
+                title=result.idea_analysis.title,
+                summary=result.idea_analysis.summary,
+                category=result.idea_analysis.category,
+                feasibility_score=result.idea_analysis.feasibility_score,
+                impact_score=result.idea_analysis.impact_score,
+                friction_score=result.idea_analysis.friction_score,
+                coaching_verdict=result.idea_analysis.coaching_verdict,
+                primary_obstacle=result.idea_analysis.primary_obstacle,
+                nudge_strategy=result.idea_analysis.nudge_strategy,
+                status="active_coaching"
+            )
+            db.add(idea_db)
+            db.flush()
+
+            decomposed_tasks = await LLMService.decompose_idea(
+                idea_title=idea_db.title,
+                idea_summary=idea_db.summary,
+                coaching_verdict=idea_db.coaching_verdict,
+                primary_obstacle=idea_db.primary_obstacle
+            )
+
+            starter_db_task = None
+            for t in decomposed_tasks:
+                task_db = Task(
+                    user_id=user.id,
+                    idea_id=idea_db.id,
+                    title=t.title,
+                    description=t.description,
+                    is_starter_step=t.is_starter_step,
+                    sequence_order=t.sequence_order,
+                    estimated_minutes=t.estimated_minutes,
+                    friction_level=t.friction_level,
+                    energy_requirement=t.energy_requirement,
+                    priority=t.priority
+                )
+                db.add(task_db)
+                if t.is_starter_step:
+                    starter_db_task = task_db
+
+            db.commit()
+
+            # Automatically schedule Step 1 ignition action into the next open focus window!
+            if starter_db_task:
+                db.refresh(starter_db_task)
+                cal_event = SchedulerService.auto_schedule_task(db, user.id, starter_db_task)
+                if cal_event:
+                    target_task_title = f"{cal_event.start_time.strftime('%H:%M')} {starter_db_task.title}"
+
+            action_label = f"IDEA: {result.idea_analysis.feasibility_score}% Feasible"
+
+        elif result.classification == "IMMEDIATE_TASK":
+            for t in result.extracted_tasks:
+                task_db = Task(
+                    user_id=user.id,
+                    title=t.title,
+                    estimated_minutes=t.estimated_minutes,
+                    friction_level=t.friction_level,
+                    energy_requirement=t.energy_requirement,
+                    priority=t.priority,
+                    status="pending"
+                )
+                db.add(task_db)
+                db.commit()
+                db.refresh(task_db)
+
+                # Auto-schedule task into calendar
+                cal_event = SchedulerService.auto_schedule_task(db, user.id, task_db)
+                if cal_event:
+                    target_task_title = f"{cal_event.start_time.strftime('%H:%M')} {task_db.title}"
+                else:
+                    target_task_title = task_db.title
+            action_label = "TASK BOOKED"
+
+        elif result.classification == "CALENDAR_COMMAND":
+            today = date.today()
+            snapshots = []
+            for offset in range(7):
+                cur_date = today + timedelta(days=offset)
+                events = CalendarService.get_events_for_range(db, user.id, cur_date, cur_date)
+                d_res = DensityService.calculate_day_density(cur_date, events)
+                snapshots.append(d_res.model_dump())
+
+            tasks = db.query(Task).filter(Task.user_id == user.id, Task.status != "completed").limit(5).all()
+            tasks_dicts = [{"id": t.id, "title": t.title, "friction": t.friction_level} for t in tasks]
+
+            nlp_res = await LLMService.analyze_density_and_nlp(
+                command=transcript,
+                density_snapshots=snapshots,
+                existing_tasks=tasks_dicts
+            )
+            action_label = "CALENDAR SHIFTED"
+            target_task_title = nlp_res.nlp_summary[:24]
+
         # Return compact feedback for OLED screen
         return {
             "status": "success",

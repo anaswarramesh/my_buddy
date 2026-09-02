@@ -830,9 +830,13 @@
                     await fetchIdeas();
                 }
                 
-                await fetchDailySynthesis();
+                await fetchDailySynthesis(currentSelectedDate);
                 await fetchDensityForecast();
                 input.value = '';
+
+                if (result.auto_action_summary) {
+                    alert("⚡ " + result.auto_action_summary);
+                }
                 
             } catch (err) {
                 console.error("Error processing thought:", err);

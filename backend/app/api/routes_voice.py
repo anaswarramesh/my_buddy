@@ -13,6 +13,12 @@ from app.services.llm_service import LLMService
 from app.models.idea import Idea
 from app.models.task import Task
 from app.models.user import User
+from app.models.calendar import CalendarEvent
+from app.services.calendar_service import CalendarService
+from app.services.density_service import DensityService
+from app.services.scheduler_service import SchedulerService
+from app.services.event_parser import EventParserService
+from datetime import date, timedelta
 
 router = APIRouter(prefix="/api/voice", tags=["Voice Processing"])
 
@@ -61,7 +67,42 @@ async def process_thought_endpoint(
         coaching_persona=user.coaching_style
     )
 
-    # Persist if BIG_IDEA
+    # 1. First, check if voice transcript contains an explicit meeting or appointment with a time
+    parsed_event = EventParserService.parse_event_from_text(payload.transcript)
+    if parsed_event:
+        cal_event = CalendarEvent(
+            user_id=user.id,
+            title=parsed_event["title"],
+            start_time=parsed_event["start_dt"],
+            end_time=parsed_event["end_dt"],
+            is_fixed=True,
+            event_category="voice_meeting",
+            cognitive_weight=parsed_event["cognitive_weight"]
+        )
+        db.add(cal_event)
+        db.commit()
+        db.refresh(cal_event)
+
+        # Push to Google Calendar if linked
+        google_token = await CalendarService.get_valid_google_token(db, user.id)
+        if google_token:
+            try:
+                await CalendarService.create_google_event(
+                    access_token=google_token,
+                    title=cal_event.title,
+                    start_time=cal_event.start_time,
+                    end_time=cal_event.end_time,
+                    description="Scheduled via CoachPilot AI Voice"
+                )
+            except Exception as e:
+                print(f"[Google Calendar] Failed to push voice event: {e}")
+
+        result.classification = "CALENDAR_COMMAND"
+        result.auto_action_summary = f"Booked '{cal_event.title}' on {cal_event.start_time.strftime('%A, %b %d at %I:%M %p')}."
+        result.coaching_nudge = f"Scheduled '{cal_event.title}' directly into your calendar."
+        return result
+
+    # 2. Persist if BIG_IDEA
     if result.classification in ["BIG_IDEA", "HYBRID"] and result.idea_analysis:
         idea_db = Idea(
             user_id=user.id,
@@ -88,6 +129,7 @@ async def process_thought_endpoint(
             primary_obstacle=idea_db.primary_obstacle
         )
 
+        starter_task_db = None
         for t in decomposed_tasks:
             task_db = Task(
                 user_id=user.id,
@@ -102,9 +144,17 @@ async def process_thought_endpoint(
                 priority=t.priority
             )
             db.add(task_db)
+            if t.is_starter_step:
+                starter_task_db = task_db
 
         db.commit()
-        result.auto_action_summary = f"Created idea '{idea_db.title}' and generated {len(decomposed_tasks)} starter steps."
+
+        # Auto-schedule starter action into calendar
+        if starter_task_db:
+            db.refresh(starter_task_db)
+            SchedulerService.auto_schedule_task(db, user.id, starter_task_db)
+
+        result.auto_action_summary = f"Created idea '{idea_db.title}' and scheduled 15m micro-ignition action into your calendar."
 
     elif result.classification == "IMMEDIATE_TASK":
         for t in result.extracted_tasks:
@@ -119,7 +169,31 @@ async def process_thought_endpoint(
                 status="pending"
             )
             db.add(task_db)
-        db.commit()
-        result.auto_action_summary = f"Logged {len(result.extracted_tasks)} immediate task(s)."
+            db.commit()
+            db.refresh(task_db)
+
+            # Auto-schedule task into calendar
+            SchedulerService.auto_schedule_task(db, user.id, task_db)
+
+        result.auto_action_summary = f"Logged and auto-scheduled {len(result.extracted_tasks)} task(s) into your focus window."
+
+    elif result.classification == "CALENDAR_COMMAND":
+        today = date.today()
+        snapshots = []
+        for offset in range(7):
+            cur_date = today + timedelta(days=offset)
+            events = CalendarService.get_events_for_range(db, user.id, cur_date, cur_date)
+            d_res = DensityService.calculate_day_density(cur_date, events)
+            snapshots.append(d_res.model_dump())
+
+        tasks = db.query(Task).filter(Task.user_id == user.id, Task.status != "completed").limit(5).all()
+        tasks_dicts = [{"id": t.id, "title": t.title, "friction": t.friction_level} for t in tasks]
+
+        nlp_res = await LLMService.analyze_density_and_nlp(
+            command=payload.transcript,
+            density_snapshots=snapshots,
+            existing_tasks=tasks_dicts
+        )
+        result.auto_action_summary = nlp_res.nlp_summary
 
     return result
