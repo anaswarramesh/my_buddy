@@ -61,9 +61,10 @@ def get_hardware_display_data(user_id: str = "default-user", db: Session = Depen
     events_list = []
     sorted_events = sorted(events, key=lambda e: e.start_time)
     for ev in sorted_events[:4]:
+        clean_title = ev.title.replace("⚡", "").replace("🎙️", "").strip()
         events_list.append({
             "time": ev.start_time.strftime("%H:%M"),
-            "title": ev.title[:14] # concise for 128px OLED screen
+            "title": clean_title[:14] # concise for 128px OLED screen
         })
 
     return {
