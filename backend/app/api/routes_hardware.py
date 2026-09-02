@@ -79,6 +79,46 @@ def get_hardware_display_data(user_id: str = "default-user", db: Session = Depen
         "tasks": tasks_list
     }
 
+@router.post("/voice-diag")
+async def voice_diagnostics(request: Request):
+    from app.config import settings
+    import base64
+    body = await request.body()
+    result = {
+        "audio_bytes_received": len(body),
+        "gemini_api_key_set": bool(settings.gemini_api_key),
+        "openai_api_key_set": bool(settings.openai_api_key)
+    }
+    if settings.gemini_api_key and len(body) > 200:
+        import httpx
+        try:
+            encoded_audio = base64.b64encode(body).decode("utf-8")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.gemini_api_key}"
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "audio/wav",
+                                    "data": encoded_audio
+                                }
+                            },
+                            {
+                                "text": "Transcribe the spoken words verbatim."
+                            }
+                        ]
+                    }
+                ]
+            }
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, json=payload)
+                result["gemini_status"] = resp.status_code
+                result["gemini_resp"] = resp.text[:500]
+        except Exception as e:
+            result["gemini_error"] = str(e)
+    return result
+
 @router.post("/voice-upload")
 async def handle_hardware_voice_upload(
     request: Request,
