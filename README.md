@@ -1,38 +1,39 @@
-# CoachPilot AI (My Buddy) — ESP32 Physical AI Desk Companion & Productivity Engine
+# CoachPilot AI (My Buddy) — Waveshare ESP32-S3 Mini AI Desk Companion & Productivity Engine
 
-**CoachPilot AI** is a physical hardware desk assistant powered by the **ESP32** microcontroller, an **INMP441 I2S digital microphone**, and an **SSD1306 OLED display**. It syncs bi-directionally with your Google and Apple calendars, captures unfiltered voice notes, evaluates the feasibility of big ideas, generates frictionless $\le 15$-minute micro-ignition tasks, and automatically schedules them into low-density calendar slots.
+**CoachPilot AI** is a physical hardware desk assistant powered by the **Waveshare ESP32-S3 Mini Development Board, Based on ESP32-S3FH4R2 Dual-Core Processor, 240MHz Running Frequency, 2.4GHz Wi-Fi & Bluetooth 5**, paired with an **INMP441 I2S digital microphone** and an **SSD1306 OLED display**. It syncs bi-directionally with your Google and Apple calendars, captures unfiltered voice notes, evaluates the feasibility of big ideas, generates frictionless $\le 15$-minute micro-ignition tasks, and automatically schedules them into low-density calendar slots.
 
 ---
 
 ## 🌟 End-to-End System Architecture
 
 ```
- ┌─────────────────────────────────────────────────────────┐
- │               PHYSICAL DESK COMPANION (ESP32)           │
- │                                                         │
- │  ┌────────────────┐   ┌────────────────┐   ┌─────────┐  │
- │  │ 0.96" I2C OLED │   │ INMP441 I2S Mic│   │ Push-To-│  │
- │  │  (128x64 Pix)  │   │  (16kHz/16-bit)│   │  Talk   │  │
- │  └───────▲────────┘   └───────▲────────┘   └───▲─────┘  │
- │          │ (I2C)              │ (I2S DMA)      │ (GPIO) │
- │  ┌───────┴────────────────────┴────────────────┴──────┐ │
- │  │             ESP32-S3 / ESP32-WROOM-32              │ │
- │  └────────────────────────────┬───────────────────────┘ │
- └───────────────────────────────┼─────────────────────────┘
+ ┌─────────────────────────────────────────────────────────────────┐
+ │       PHYSICAL DESK COMPANION (WAVESHARE ESP32-S3 MINI)         │
+ │                                                                 │
+ │  ┌────────────────┐   ┌────────────────┐   ┌─────────────────┐  │
+ │  │ 0.96" I2C OLED │   │ INMP441 I2S Mic│   │ TS1215CJ Tactile│  │
+ │  │  (128x64 Pix)  │   │  (16kHz/16-bit)│   │ Push-To-Talk BTN│  │
+ │  └───────▲────────┘   └───────▲────────┘   └────────▲────────┘  │
+ │          │ (I2C)              │ (I2S DMA)           │ (GPIO)    │
+ │  ┌───────┴────────────────────┴─────────────────────┴─────────┐ │
+ │  │ Waveshare ESP32-S3 Mini (ESP32-S3FH4R2 240MHz Dual-Core)   │ │
+ │  │ 4MB Flash + 2MB On-Chip Quad-SPI PSRAM (R2)                │ │
+ │  └────────────────────────────┬───────────────────────────────┘ │
+ └───────────────────────────────┼─────────────────────────────────┘
                                  │ Wi-Fi (HTTPS REST / JSON)
                                  ▼
- ┌─────────────────────────────────────────────────────────┐
- │       24/7 CLOUD-HOSTED BACKEND (No Laptop Needed)      │
- │                                                         │
- │  ┌──────────────────┐  ┌─────────────────────────────┐  │
- │  │  FastAPI Backend │  │   Supabase / SQLite DB      │  │
- │  └────────▲─────────┘  └──────────────▲──────────────┘  │
- │           │                           │                 │
- │  ┌────────┴─────────┐  ┌──────────────┴──────────────┐  │
- │  │ Whisper STT API  │  │ Google / Apple Calendar API │  │
- │  │ Gemini / GPT-4o  │  │ (Bi-directional Sync)       │  │
- │  └──────────────────┘  └─────────────────────────────┘  │
- └─────────────────────────────────────────────────────────┘
+ ┌─────────────────────────────────────────────────────────────────┐
+ │       24/7 CLOUD-HOSTED BACKEND (No Laptop Needed)              │
+ │                                                                 │
+ │  ┌──────────────────┐  ┌─────────────────────────────────────┐  │
+ │  │  FastAPI Backend │  │   Supabase / SQLite DB              │  │
+ │  └────────▲─────────┘  └──────────────▲──────────────────────┘  │
+ │           │                           │                         │
+ │  ┌────────┴─────────┐  ┌──────────────┴──────────────────────┐  │
+ │  │ Whisper STT API  │  │ Google / Apple Calendar API         │  │
+ │  │ Gemini / GPT-4o  │  │ (Bi-directional Sync)               │  │
+ │  └──────────────────┘  └─────────────────────────────────────┘  │
+ └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -43,7 +44,7 @@ CoachPilot uses a multi-stage cognitive pipeline that converts uncompressed voic
 
 ```mermaid
 flowchart TD
-    A[Raw Audio: 16kHz WAV from ESP32] --> B[Whisper STT / Speech-to-Text]
+    A[Raw Audio: 16kHz WAV from ESP32-S3] --> B[Whisper STT / Speech-to-Text]
     B --> C[Clean Raw Transcript Text]
     
     C --> D{Prompt A: Cognitive Triage & Feasibility Coach}
@@ -60,7 +61,7 @@ flowchart TD
     K --> L[Calculate 7-Day Density D(d)]
     L --> M[Auto-Book into Green Day Focus Slot]
     M --> N[Bi-directional Write to Google/Apple Calendar]
-    N --> O[Instant OLED Feedback on ESP32]
+    N --> O[Instant OLED Feedback on ESP32-S3]
 ```
 
 ---
@@ -71,7 +72,7 @@ The system orchestrates Prompts A, B, and C through a **Hierarchical Decision Pi
 
 ```mermaid
 flowchart TD
-    A[Raw Voice Ingestion from ESP32 / Mobile] --> B[Whisper STT: Audio to Text]
+    A[Raw Voice Ingestion from ESP32-S3 / Mobile] --> B[Whisper STT: Audio to Text]
     B --> C[Always Ingest into PROMPT A: Triage & Intent Classifier]
     
     C -->|Intent Classification Result| D{What is the Classification?}
@@ -114,7 +115,7 @@ flowchart TD
 ---
 
 ### Step 1: Speech-to-Text (STT) Ingestion
-- When you hold the physical button on the ESP32, the **INMP441 I2S microphone** streams 16,000 samples/sec at 16-bit mono depth into a direct memory buffer.
+- When you hold the TS1215CJ physical button on the Waveshare ESP32-S3 Mini, the **INMP441 I2S microphone** streams 16,000 samples/sec at 16-bit mono depth into the **2MB on-chip PSRAM buffer**.
 - Releasing the button sends the binary WAV stream to `/api/hardware/voice-upload`.
 - The backend passes the audio payload to **OpenAI Whisper (`whisper-1`)** or **Google Gemini Multimodal Audio**, converting messy, unfiltered spoken thoughts into clean natural text.
 
@@ -285,59 +286,60 @@ $$D(d) = \min\left(1.0, \frac{\sum_{i=1}^{N} (T_{i} \times W_{i}) + (N \times C_
 
 | Component | Recommended Model | Purpose | Est. Cost |
 | :--- | :--- | :--- | :--- |
-| **MCU** | **ESP32-S3-DevKitC-1** (or ESP32-WROOM-32) | Dual-core 240MHz, I2S DMA, Wi-Fi networking | \$3.50 – \$5.00 |
+| **MCU** | **Waveshare ESP32-S3 Mini Development Board** | Based on **ESP32-S3FH4R2** Dual-Core Processor, 240MHz Running Frequency, 2.4GHz Wi-Fi & Bluetooth 5 (4MB Flash, 2MB on-chip PSRAM) | \$4.00 – \$5.50 |
 | **Display** | **0.96" or 1.3" I2C OLED (SSD1306)** | 128x64 graphic screen for daily synthesis | \$2.00 – \$3.00 |
 | **Microphone** | **INMP441 I2S Omnidirectional Mic** | 24-bit digital audio capture with high SNR | \$1.20 – \$2.00 |
-| **Button** | **12x12mm Tactile Push Button** | Push-to-Talk actuation switch | \$0.20 |
-| **Status LED** | **3mm / 5mm Blue or RGB LED** | Recording / upload indicator | \$0.10 |
-| **Resistor** | **220Ω 1/4W Resistor** | Current limiter for status LED | \$0.05 |
+| **Button** | **TS1215CJ 12x12mm Tactile Push Button** | 250gf actuation force, 15mm stem height | \$0.20 |
+| **Status LED** | **Onboard WS2812 RGB LED (GPIO 21)** | Status feedback (or external 3mm LED on GPIO 10) | Included |
+| **Resistor** | **220Ω 1/4W Resistor** | Only needed if using external LED | \$0.05 |
 | **Power** | **USB-C Cable + 5V/1A Wall Adapter** | Continuous desk power (or 3.7V LiPo battery) | \$2.00 |
-| **Total BOM** | | | **\$9.00 – \$12.00** |
+| **Total BOM** | | | **\$9.40 – \$12.50** |
 
 ---
 
 ## 🔌 Circuit Schematic & Wiring Pinout
 
 ```
-   ┌────────────────────────────────────────────────────────┐
-   │                       ESP32 PINOUT                     │
-   │                                                        │
-   │   [3.3V]  ────────────┬─────────────┬────────────┐     │
-   │   [GND]   ─────────┐  │ (3.3V)      │ (3.3V)     │     │
-   │                    │  │             │            │     │
-   │   [GPIO 21] ───────┼──┼── SDA       │            │     │
-   │   [GPIO 22] ───────┼──┼── SCL       │            │     │
-   │                    │  │  (OLED)     │            │     │
-   │                    │  │             │            │     │
-   │   [GPIO 33] ───────┼──┼─────────────┼── SCK      │     │
-   │   [GPIO 25] ───────┼──┼─────────────┼── WS       │     │
-   │   [GPIO 32] ───────┼──┼─────────────┼── SD       │     │
-   │                    │  │             │  (INMP441) │     │
-   │                    │  └─────────────┴── VDD      │     │
-   │                    └──┬─────────────┬── GND/L/R  │     │
-   │                       │             │            │     │
-   │   [GPIO 4]  ──────────┼── Push BTN ─┘            │     │
-   │   [GPIO 2]  ──[220Ω]──┼── Status LED ────────────┘     │
-   └───────────────────────┴────────────────────────────────┘
+   ┌────────────────────────────────────────────────────────────┐
+   │         WAVESHARE ESP32-S3 MINI (ESP32-S3FH4R2)            │
+   │                                                            │
+   │   [3V3]   ────────────┬─────────────┬────────────────┐     │
+   │   [GND]   ─────────┐  │ (3.3V)      │ (3.3V)         │     │
+   │                    │  │             │                │     │
+   │   [GPIO 8]  ───────┼──┼── SDA       │                │     │
+   │   [GPIO 9]  ───────┼──┼── SCL       │                │     │
+   │                    │  │  (OLED)     │                │     │
+   │                    │  │             │                │     │
+   │   [GPIO 3]  ───────┼──┼─────────────┼── SCK (Clock)  │     │
+   │   [GPIO 2]  ───────┼──┼─────────────┼── WS (LRCLK)   │     │
+   │   [GPIO 1]  ───────┼──┼─────────────┼── SD (Data)    │     │
+   │                    │  │             │  (INMP441)     │     │
+   │                    │  └─────────────┴── VDD          │     │
+   │                    └──┬─────────────┬── GND / L/R    │     │
+   │                       │             │                │     │
+   │   [GPIO 6]  ──────────┼── Push BTN ─┘                │     │
+   │   [GPIO 10] ──[220Ω]──┼── Status LED ────────────────┘     │
+   │   [GPIO 21] ──────────┴── Built-in WS2812 RGB LED (Onboard)│
+   └────────────────────────────────────────────────────────────┘
 ```
 
 ### Complete Pin Assignment Table
 
-| Module | Pin | ESP32 Pin | Logic Level | Description |
+| Module | Pin | Waveshare ESP32-S3 Mini Pin | Logic Level | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **SSD1306 OLED (128x64)** | **VCC** | **3V3** | 3.3V | Display Power |
 | | **GND** | **GND** | 0V | Ground |
-| | **SDA** | **GPIO 21** | 3.3V | Hardware I2C SDA |
-| | **SCL** | **GPIO 22** | 3.3V | Hardware I2C SCL |
+| | **SDA** | **GPIO 8** | 3.3V | Hardware I2C SDA |
+| | **SCL** | **GPIO 9** | 3.3V | Hardware I2C SCL |
 | **INMP441 I2S Mic** | **VDD** | **3V3** | 3.3V | Digital Mic Power |
 | | **GND** | **GND** | 0V | Ground |
 | | **L/R** | **GND** | 0V | Left Channel Select |
-| | **SD** | **GPIO 32** | 3.3V | I2S Serial Data Out |
-| | **WS** | **GPIO 25** | 3.3V | I2S Word Select / LR Clock |
-| | **SCK** | **GPIO 33** | 3.3V | I2S Bit Clock |
-| **Push-to-Talk Button** | **Pin 1** | **GPIO 4** | Active LOW | Input Pull-up (`INPUT_PULLUP`) |
+| | **SD** | **GPIO 1** | 3.3V | I2S Serial Data Out |
+| | **WS** | **GPIO 2** | 3.3V | I2S Word Select / LR Clock |
+| | **SCK** | **GPIO 3** | 3.3V | I2S Bit Clock |
+| **Push-to-Talk Button (TS1215CJ)** | **Pin 1** | **GPIO 6** | Active LOW | Input Pull-up (`INPUT_PULLUP`) |
 | | **Pin 2** | **GND** | 0V | Ground |
-| **Status LED** | **Anode (+)** | **GPIO 2** | 3.3V (220Ω) | HIGH when recording |
+| **Status LED** | **Anode (+)** | **GPIO 10** (or built-in RGB on **GPIO 21**) | 3.3V | Active HIGH when recording |
 | | **Cathode (-)**| **GND** | Ground |
 
 ---
@@ -359,7 +361,7 @@ $$D(d) = \min\left(1.0, \frac{\sum_{i=1}^{N} (T_{i} \times W_{i}) + (N \times C_
 
 ---
 
-## ⚡ Flashing the ESP32 Firmware
+## ⚡ Flashing the Waveshare ESP32-S3 Mini Firmware
 
 1. Open [`hardware/esp32/CoachPilot_ESP32.ino`](hardware/esp32/CoachPilot_ESP32.ino) in **Arduino IDE** or **VS Code PlatformIO**.
 2. Install the required libraries in Arduino IDE (*Sketch $\rightarrow$ Include Library $\rightarrow$ Manage Libraries*):
@@ -372,7 +374,14 @@ $$D(d) = \min\left(1.0, \frac{\sum_{i=1}^{N} (T_{i} \times W_{i}) + (N \times C_
    const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
    const char* SERVER_BASE = "https://your-backend-app.onrender.com"; // or local IP http://192.168.x.x:8000
    ```
-4. Connect the ESP32 board via USB, select **ESP32-S3 Dev Module** (or **ESP32 Dev Module**), and click **Upload**.
+4. Connect the board via USB-C and set the following in the **Tools Menu**:
+   - **Board:** `ESP32S3 Dev Module` (or `Waveshare ESP32-S3-Zero / Mini`)
+   - **USB CDC On Boot:** `Enabled` *(Crucial: ensures Serial Monitor works over USB-C)*
+   - **Flash Size:** `4MB (32Mb)`
+   - **Flash Mode:** `QIO 80MHz`
+   - **PSRAM:** `QSPI PSRAM` *(Enables the on-chip 2MB Quad PSRAM R2 chip)*
+   - **Upload Mode:** `UART0 / Hardware CDC`
+5. Click **Upload**.
 
 ---
 
