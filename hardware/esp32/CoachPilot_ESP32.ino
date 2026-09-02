@@ -3,7 +3,7 @@
  * Target MCU: Waveshare ESP32-S3 Mini Development Board
  * 
  * Performance Upgrades:
- * 1. Hardware Pin Interrupts: Zero-delay button press & release (<1ms)
+ * 1. Debounced Push-to-Talk: 0ms instant press, bounce rejection, clean release
  * 2. FreeRTOS Dual-Core Execution: Network uploads pinned to Core 0, UI/Audio on Core 1
  * 3. INMP441 Microphone Gain: +6dB digital audio boost with live Serial VU meter
  * 4. Split OLED UI: Left Load % box + Right Events & Start Times
@@ -57,10 +57,12 @@ enum DeviceState {
     STATE_ERROR
 };
 
-volatile DeviceState currentState = STATE_BOOT;
+DeviceState currentState = STATE_BOOT;
 uint8_t* audioBuffer = nullptr;
-volatile size_t recordedBytes = 0;
+size_t recordedBytes = 0;
 unsigned long lastDisplayPoll = 0;
+unsigned long recordingStartTime = 0;
+int consecutiveHighCount = 0;
 int animFrame = 0;
 
 // Dashboard Data
@@ -83,10 +85,6 @@ String resultStatus = "PROCESSED";
 String resultTask = "";
 int resultFeasibility = 0;
 
-// Hardware Interrupt Flags
-volatile bool isButtonPressed = false;
-volatile bool isButtonReleased = false;
-
 // FreeRTOS Background Upload Task Handle
 TaskHandle_t uploadTaskHandle = NULL;
 volatile bool uploadFinished = false;
@@ -102,16 +100,6 @@ void drawUploadingScreen();
 void drawResultScreen();
 void drawErrorScreen(String errorMsg);
 bool performHttpsUpload();
-
-// ================= HARDWARE PIN INTERRUPT =================
-void IRAM_ATTR handleButtonISR() {
-    int state = digitalRead(PIN_BUTTON);
-    if (state == LOW) {
-        isButtonPressed = true;
-    } else {
-        isButtonReleased = true;
-    }
-}
 
 // ================= FREERTOS BACKGROUND NETWORK TASK (CORE 0) =================
 void uploadWorkerTask(void* parameter) {
@@ -134,9 +122,6 @@ void setup() {
     pinMode(PIN_BUTTON, INPUT_PULLUP);
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
-
-    // Attach hardware pin interrupt on GPIO 6
-    attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), handleButtonISR, CHANGE);
 
     // Initialize I2C Bus for Waveshare ESP32-S3 Mini
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
@@ -209,47 +194,17 @@ void setup() {
 
 // ================= MAIN LOOP (CORE 1) =================
 void loop() {
-    // 1. Instant Hardware Interrupt Handling (<1ms latency)
-    if (isButtonPressed) {
-        isButtonPressed = false;
-        if (currentState != STATE_RECORDING) {
-            currentState = STATE_RECORDING;
-            recordedBytes = 0;
-            digitalWrite(PIN_STATUS_LED, HIGH);
-            Serial.println(F("\n[BUTTON] Pressed -> Recording Started immediately!"));
-            drawRecordingScreen();
-        }
-    }
-
-    if (isButtonReleased) {
-        isButtonReleased = false;
-        if (currentState == STATE_RECORDING) {
-            digitalWrite(PIN_STATUS_LED, LOW);
-            Serial.print(F("[BUTTON] Released -> Captured "));
-            Serial.print(recordedBytes);
-            Serial.println(F(" audio bytes"));
-
-            if (recordedBytes > 1500) {
-                currentState = STATE_UPLOADING;
-                drawUploadingScreen();
-                // Trigger background upload on Core 0 without blocking this loop!
-                if (uploadTaskHandle) {
-                    xTaskNotifyGive(uploadTaskHandle);
-                }
-            } else {
-                Serial.println(F("[BUTTON] Press too short (<0.1s), ignoring"));
-                currentState = STATE_IDLE;
-                drawDashboard();
-            }
-        }
-    }
-
-    // 2. State Machine Handling
     switch (currentState) {
         case STATE_IDLE: {
-            // Backup direct pin check
+            // Instant 0ms detection on button press (Active LOW)
             if (digitalRead(PIN_BUTTON) == LOW) {
-                isButtonPressed = true;
+                currentState = STATE_RECORDING;
+                recordedBytes = 0;
+                consecutiveHighCount = 0;
+                recordingStartTime = millis();
+                digitalWrite(PIN_STATUS_LED, HIGH);
+                Serial.println(F("\n[BUTTON] Pressed -> Recording Started immediately!"));
+                drawRecordingScreen();
                 break;
             }
 
@@ -263,20 +218,53 @@ void loop() {
         }
 
         case STATE_RECORDING: {
-            // Animated VU waveform every 100ms
+            // 1. Release check with mechanical bounce rejection
+            // Ignore contact chatter during the first 150ms of hold
+            if (millis() - recordingStartTime > 150) {
+                if (digitalRead(PIN_BUTTON) == HIGH) {
+                    consecutiveHighCount++;
+                    // Require 3 consecutive HIGH reads (~15ms) to confirm genuine release
+                    if (consecutiveHighCount >= 3) {
+                        digitalWrite(PIN_STATUS_LED, LOW);
+                        unsigned long durationMs = millis() - recordingStartTime;
+                        Serial.print(F("[BUTTON] Released -> Held for "));
+                        Serial.print(durationMs);
+                        Serial.print(F(" ms, Captured "));
+                        Serial.print(recordedBytes);
+                        Serial.println(F(" audio bytes"));
+
+                        if (recordedBytes > 4000) { // At least 0.12s of valid audio
+                            currentState = STATE_UPLOADING;
+                            drawUploadingScreen();
+                            // Trigger background upload on Core 0 without freezing UI!
+                            if (uploadTaskHandle) {
+                                xTaskNotifyGive(uploadTaskHandle);
+                            }
+                        } else {
+                            Serial.println(F("[BUTTON] Audio too short (<0.12s), returning to idle"));
+                            currentState = STATE_IDLE;
+                            drawDashboard();
+                        }
+                        break;
+                    }
+                } else {
+                    consecutiveHighCount = 0; // Still actively pressed & held
+                }
+            }
+
+            // 2. Animated waveform update every 100ms
             static unsigned long lastVuUpdate = 0;
             if (millis() - lastVuUpdate > 100) {
                 drawRecordingScreen();
                 lastVuUpdate = millis();
             }
 
-            // Read I2S audio chunk non-blocking (10ms timeout)
+            // 3. Read I2S audio chunk non-blocking (10ms timeout)
             if (audioBuffer && (recordedBytes < BUFFER_SIZE)) {
                 size_t bytesRead = 0;
                 uint8_t temp[512];
                 i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, pdMS_TO_TICKS(10));
                 if (bytesRead > 0 && (recordedBytes + bytesRead <= BUFFER_SIZE)) {
-                    // Copy raw PCM into buffer
                     uint8_t* dest = audioBuffer + 44 + recordedBytes;
                     memcpy(dest, temp, bytesRead);
 
@@ -295,12 +283,12 @@ void loop() {
 
                     // Print audio level to Serial Monitor periodically
                     static unsigned long lastSerialVu = 0;
-                    if (millis() - lastSerialVu > 300) {
+                    if (millis() - lastSerialVu > 350) {
                         Serial.print(F("[MIC] Peak Amplitude: "));
                         Serial.print(peak);
-                        if (peak > 1000) Serial.println(F(" [LOUD SPEECH]"));
-                        else if (peak > 200) Serial.println(F(" [MODERATE SPEECH]"));
-                        else Serial.println(F(" [NEAR SILENT - check mic wiring]"));
+                        if (peak > 1200) Serial.println(F(" [LOUD SPEECH]"));
+                        else if (peak > 300) Serial.println(F(" [MODERATE SPEECH]"));
+                        else Serial.println(F(" [NEAR SILENT - speak closer or check wiring]"));
                         lastSerialVu = millis();
                     }
 
@@ -311,7 +299,7 @@ void loop() {
         }
 
         case STATE_UPLOADING: {
-            // Check if Core 0 finished the background upload
+            // Wait for background upload task on Core 0 to finish
             if (uploadFinished) {
                 if (uploadSuccess) {
                     currentState = STATE_RESULT;
@@ -328,10 +316,15 @@ void loop() {
             if (resultStartTime == 0) {
                 resultStartTime = millis();
             }
-            // If button is pressed during result, immediately restart recording!
+            // If button is pressed during result, immediately start new recording!
             if (digitalRead(PIN_BUTTON) == LOW) {
                 resultStartTime = 0;
-                isButtonPressed = true;
+                currentState = STATE_RECORDING;
+                recordedBytes = 0;
+                consecutiveHighCount = 0;
+                recordingStartTime = millis();
+                digitalWrite(PIN_STATUS_LED, HIGH);
+                drawRecordingScreen();
                 break;
             }
             if (millis() - resultStartTime > 2500) {
@@ -357,7 +350,7 @@ void loop() {
         }
     }
 
-    delay(2); // Tight 2ms loop for instantaneous responsiveness
+    delay(4); // 4ms tight polling loop
 }
 
 // ================= I2S DRIVER =================
