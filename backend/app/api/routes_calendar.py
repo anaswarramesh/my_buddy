@@ -80,3 +80,64 @@ def seed_demo_calendar_endpoint(user_id: str = "default-user", db: Session = Dep
         sync_status="success",
         message="Demo calendar successfully synchronized with mixed density profiles."
     )
+
+@router.get("/google/login")
+def google_calendar_login(user_id: str = "default-user"):
+    """
+    Redirects user to Google OAuth 2.0 consent screen.
+    """
+    from fastapi.responses import RedirectResponse
+    from app.config import settings
+
+    redirect_uri = settings.google_redirect_uri or f"{settings.base_url}/api/calendar/google/callback"
+    if not settings.google_client_id:
+        raise HTTPException(status_code=400, detail="GOOGLE_CLIENT_ID is not configured in environment variables.")
+
+    auth_url = CalendarService.get_google_auth_url(user_id, redirect_uri)
+    return RedirectResponse(url=auth_url)
+
+@router.get("/google/callback")
+async def google_calendar_callback(
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    state: Optional[str] = "default-user",
+    db: Session = Depends(get_db)
+):
+    """
+    Receives OAuth 2.0 authorization code from Google, exchanges it for tokens, and performs initial event sync.
+    """
+    from fastapi.responses import HTMLResponse
+    from app.config import settings
+
+    if error:
+        return HTMLResponse(f"<h3>Google Authorization Failed</h3><p>{error}</p>", status_code=400)
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Authorization code missing from Google callback.")
+
+    redirect_uri = settings.google_redirect_uri or f"{settings.base_url}/api/calendar/google/callback"
+    tokens = await CalendarService.exchange_code_for_tokens(code, redirect_uri)
+
+    if "error" in tokens:
+        return HTMLResponse(f"<h3>Token Exchange Failed</h3><p>{tokens.get('error')}</p>", status_code=400)
+
+    access_token = tokens.get("access_token")
+    user_id = state or "default-user"
+
+    # Sync events for upcoming 7 days
+    synced_count = await CalendarService.sync_google_events(db, user_id, access_token, days=7)
+
+    return HTMLResponse(f"""
+    <html>
+        <head><title>Google Calendar Connected</title></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 40px;">
+            <div style="max-width: 500px; margin: auto; padding: 30px; border-radius: 12px; border: 1px solid #e0e0e0; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                <h2 style="color: #10B981; margin-top: 0;">Google Calendar Connected!</h2>
+                <p>Successfully synced <strong>{synced_count}</strong> upcoming events into CoachPilot AI.</p>
+                <p style="color: #666; font-size: 14px;">Your Waveshare ESP32-S3 Mini desk companion and mobile dashboard now reflect your live calendar density.</p>
+                <a href="/" style="display: inline-block; margin-top: 15px; padding: 10px 20px; background: #2563EB; color: #fff; text-decoration: none; border-radius: 8px;">Go to Dashboard</a>
+            </div>
+        </body>
+    </html>
+    """)
+
