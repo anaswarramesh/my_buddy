@@ -25,8 +25,8 @@
 const char* WIFI_SSID = "YOUR_WIFI_SSID";
 const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
 
-// Server URL: Your 24/7 Cloud backend (Render/Fly.io) or local LAN IP
-const char* SERVER_BASE = "https://your-backend-app.onrender.com";
+// Server URL: Your 24/7 Cloud backend (Render)
+const char* SERVER_BASE = "https://my-buddy-81bd.onrender.com";
 
 // ================= PIN DEFINITIONS FOR WAVESHARE ESP32-S3 MINI =================
 #define PIN_BUTTON      6   // Push-to-Talk Button (GPIO 6 to GND)
@@ -149,15 +149,14 @@ void setup() {
 void loop() {
     switch (currentState) {
         case STATE_IDLE: {
-            // Check Push-to-Talk Button (Active LOW on GPIO 6)
             if (digitalRead(PIN_BUTTON) == LOW) {
                 currentState = STATE_RECORDING;
                 recordedBytes = 0;
                 digitalWrite(PIN_STATUS_LED, HIGH);
+                Serial.println(F("\n[REC] Button Pressed -> Recording audio..."));
                 drawRecordingScreen();
             }
 
-            // Periodic 60-second background refresh
             if (millis() - lastDisplayPoll > 60000) {
                 fetchDisplayData();
                 drawDashboard();
@@ -167,8 +166,12 @@ void loop() {
         }
 
         case STATE_RECORDING: {
-            // Draw animated VU waveform while button is held
-            drawRecordingScreen();
+            // Update animated waveform every 120ms to prevent blocking I2S audio stream
+            static unsigned long lastVuUpdate = 0;
+            if (millis() - lastVuUpdate > 120) {
+                drawRecordingScreen();
+                lastVuUpdate = millis();
+            }
 
             // Read I2S audio chunk into buffer (offset by 44 bytes for WAV header)
             if (audioBuffer && (recordedBytes < BUFFER_SIZE)) {
@@ -181,15 +184,18 @@ void loop() {
                 }
             }
 
-            // Button released: Stop recording and upload
             if (digitalRead(PIN_BUTTON) == HIGH) {
                 digitalWrite(PIN_STATUS_LED, LOW);
+                Serial.print(F("[REC] Button Released -> Captured "));
+                Serial.print(recordedBytes);
+                Serial.println(F(" audio bytes"));
+
                 if (recordedBytes > 1500) {
                     currentState = STATE_UPLOADING;
                     drawUploadingScreen();
                     uploadAudio();
                 } else {
-                    // Audio too short (< 0.1s)
+                    Serial.println(F("[REC] Audio too short (< 0.1s), ignoring"));
                     currentState = STATE_IDLE;
                     drawDashboard();
                 }
@@ -198,7 +204,6 @@ void loop() {
         }
 
         case STATE_UPLOADING: {
-            // Handled inside uploadAudio()
             break;
         }
 
@@ -232,8 +237,8 @@ void initI2S() {
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = I2S_COMM_FORMAT_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 4,
-        .dma_buf_len = 1024,
+        .dma_buf_count = 8,
+        .dma_buf_len = 512,
         .use_apll = false
     };
 
@@ -252,10 +257,13 @@ void initI2S() {
 void uploadAudio() {
     if (!audioBuffer) return;
 
-    // Generate standard 44-byte WAV header at buffer start
     writeWavHeader(audioBuffer, recordedBytes, SAMPLE_RATE, 1, 16);
 
     if (WiFi.status() == WL_CONNECTED) {
+        Serial.print(F("[HTTP] Uploading "));
+        Serial.print(recordedBytes + 44);
+        Serial.println(F(" bytes WAV to Render cloud..."));
+
         WiFiClientSecure client;
         client.setInsecure(); // Skip certificate verification for cloud server
         HTTPClient http;
@@ -265,8 +273,14 @@ void uploadAudio() {
         http.setTimeout(15000); // 15-second timeout for LLM inference
 
         int httpCode = http.POST(audioBuffer, recordedBytes + 44);
+        Serial.print(F("[HTTP] Response Code: "));
+        Serial.println(httpCode);
+
         if (httpCode == 200) {
             String respStr = http.getString();
+            Serial.print(F("[HTTP] Server Response: "));
+            Serial.println(respStr);
+
             JsonDocument doc;
             deserializeJson(doc, respStr);
 
@@ -276,11 +290,15 @@ void uploadAudio() {
 
             currentState = STATE_RESULT;
         } else {
+            String errStr = http.getString();
+            Serial.print(F("[HTTP] Error Body: "));
+            Serial.println(errStr);
             drawErrorScreen("HTTP Error " + String(httpCode));
             currentState = STATE_ERROR;
         }
         http.end();
     } else {
+        Serial.println(F("[HTTP] WiFi Disconnected, cannot upload"));
         drawErrorScreen("WiFi Disconnected");
         currentState = STATE_ERROR;
     }

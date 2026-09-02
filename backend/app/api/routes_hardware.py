@@ -112,6 +112,23 @@ async def handle_hardware_voice_upload(
             db.commit()
             db.refresh(cal_event)
 
+            # Also create a Task record so it appears in the user's tasks list!
+            duration = max(15, int((cal_event.end_time - cal_event.start_time).total_seconds() / 60))
+            task_db = Task(
+                user_id=user.id,
+                title=cal_event.title,
+                estimated_minutes=duration,
+                is_scheduled=True,
+                scheduled_start=cal_event.start_time,
+                scheduled_end=cal_event.end_time,
+                status="scheduled",
+                priority="high",
+                friction_level="easy",
+                energy_requirement="focus"
+            )
+            db.add(task_db)
+            db.commit()
+
             # Sync to Google Calendar if connected
             google_token = await CalendarService.get_valid_google_token(db, user.id)
             if google_token:
