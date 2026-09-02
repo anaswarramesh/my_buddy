@@ -174,24 +174,7 @@ void loop() {
         }
 
         case STATE_RECORDING: {
-            // Update animated waveform every 120ms to prevent blocking I2S audio stream
-            static unsigned long lastVuUpdate = 0;
-            if (millis() - lastVuUpdate > 120) {
-                drawRecordingScreen();
-                lastVuUpdate = millis();
-            }
-
-            // Read I2S audio chunk into buffer (offset by 44 bytes for WAV header)
-            if (audioBuffer && (recordedBytes < BUFFER_SIZE)) {
-                size_t bytesRead = 0;
-                uint8_t temp[512];
-                i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, portMAX_DELAY);
-                if (bytesRead > 0 && (recordedBytes + bytesRead <= BUFFER_SIZE)) {
-                    memcpy(audioBuffer + 44 + recordedBytes, temp, bytesRead);
-                    recordedBytes += bytesRead;
-                }
-            }
-
+            // Check button release FIRST for immediate response
             if (digitalRead(PIN_BUTTON) == HIGH) {
                 digitalWrite(PIN_STATUS_LED, LOW);
                 Serial.print(F("[REC] Button Released -> Captured "));
@@ -207,6 +190,25 @@ void loop() {
                     currentState = STATE_IDLE;
                     drawDashboard();
                 }
+                break;
+            }
+
+            // Update animated waveform every 100ms
+            static unsigned long lastVuUpdate = 0;
+            if (millis() - lastVuUpdate > 100) {
+                drawRecordingScreen();
+                lastVuUpdate = millis();
+            }
+
+            // Read I2S audio chunk with non-blocking 10ms timeout
+            if (audioBuffer && (recordedBytes < BUFFER_SIZE)) {
+                size_t bytesRead = 0;
+                uint8_t temp[512];
+                i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, pdMS_TO_TICKS(10));
+                if (bytesRead > 0 && (recordedBytes + bytesRead <= BUFFER_SIZE)) {
+                    memcpy(audioBuffer + 44 + recordedBytes, temp, bytesRead);
+                    recordedBytes += bytesRead;
+                }
             }
             break;
         }
@@ -216,24 +218,44 @@ void loop() {
         }
 
         case STATE_RESULT: {
-            drawResultScreen();
-            delay(3500);
-            fetchDisplayData();
-            currentState = STATE_IDLE;
-            drawDashboard();
+            static unsigned long resultStartTime = 0;
+            if (resultStartTime == 0) {
+                resultStartTime = millis();
+            }
+            // Allow immediate re-recording if button is pressed again
+            if (digitalRead(PIN_BUTTON) == LOW) {
+                resultStartTime = 0;
+                currentState = STATE_RECORDING;
+                recordedBytes = 0;
+                digitalWrite(PIN_STATUS_LED, HIGH);
+                Serial.println(F("\n[REC] Button Pressed -> Immediate re-trigger"));
+                drawRecordingScreen();
+                break;
+            }
+            if (millis() - resultStartTime > 2500) {
+                resultStartTime = 0;
+                fetchDisplayData();
+                currentState = STATE_IDLE;
+                drawDashboard();
+            }
             break;
         }
 
         case STATE_ERROR: {
-            delay(3000);
-            fetchDisplayData();
-            currentState = STATE_IDLE;
-            drawDashboard();
+            static unsigned long errStartTime = 0;
+            if (errStartTime == 0) {
+                errStartTime = millis();
+            }
+            if (digitalRead(PIN_BUTTON) == LOW || millis() - errStartTime > 2500) {
+                errStartTime = 0;
+                currentState = STATE_IDLE;
+                drawDashboard();
+            }
             break;
         }
     }
 
-    delay(20);
+    delay(5);
 }
 
 // ================= I2S DRIVER =================

@@ -24,7 +24,8 @@ class WhisperService:
             try:
                 import httpx
                 encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.gemini_api_key}"
+                models_to_try = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
+                
                 payload = {
                     "contents": [
                         {
@@ -36,26 +37,31 @@ class WhisperService:
                                     }
                                 },
                                 {
-                                    "text": "Transcribe the spoken audio into English text. Return ONLY the verbatim transcribed words without any markdown, quotes, notes, or explanations. If completely silent, return an empty string."
+                                    "text": "Transcribe the spoken audio verbatim into English text. Return ONLY the transcribed words without any quotes, introductory phrases, or explanations. If no clear speech is detected, return an empty string."
                                 }
                             ]
                         }
                     ]
                 }
+
                 async with httpx.AsyncClient(timeout=20.0) as client:
-                    resp = await client.post(url, json=payload)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts:
-                                text = parts[0].get("text", "").strip()
-                                if text:
-                                    print(f"[WhisperService] Gemini transcribed: '{text}'")
-                                    return text
-                    else:
-                        print(f"[WhisperService] Gemini API returned {resp.status_code}: {resp.text}")
+                    for model_name in models_to_try:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.gemini_api_key}"
+                        resp = await client.post(url, json=payload)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    text = parts[0].get("text", "").strip()
+                                    if text:
+                                        print(f"[WhisperService] {model_name} transcribed: '{text}'")
+                                        return text
+                        elif resp.status_code == 404:
+                            continue # Try next model candidate
+                        else:
+                            print(f"[WhisperService] {model_name} returned {resp.status_code}: {resp.text}")
             except Exception as e:
                 print(f"[WhisperService] Gemini audio transcription error: {e}")
 
