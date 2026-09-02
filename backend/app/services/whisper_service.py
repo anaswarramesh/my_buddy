@@ -24,7 +24,13 @@ class WhisperService:
             try:
                 import httpx
                 encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
-                models_to_try = ["gemini-3.6-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash"]
+                models_to_try = [
+                    "gemini-flash-latest",
+                    "gemini-flash-lite-latest",
+                    "gemini-2.5-flash-lite",
+                    "gemini-pro-latest",
+                    "gemini-3.6-flash"
+                ]
                 
                 payload = {
                     "contents": [
@@ -44,24 +50,25 @@ class WhisperService:
                     ]
                 }
 
-                async with httpx.AsyncClient(timeout=20.0) as client:
+                async with httpx.AsyncClient(timeout=15.0) as client:
                     for model_name in models_to_try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.gemini_api_key}"
-                        resp = await client.post(url, json=payload)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            candidates = data.get("candidates", [])
-                            if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
-                                if parts:
-                                    text = parts[0].get("text", "").strip()
-                                    if text:
-                                        print(f"[WhisperService] {model_name} transcribed: '{text}'")
-                                        return text
-                        elif resp.status_code == 404:
-                            continue # Try next model candidate
-                        else:
-                            print(f"[WhisperService] {model_name} returned {resp.status_code}: {resp.text}")
+                        try:
+                            resp = await client.post(url, json=payload)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                candidates = data.get("candidates", [])
+                                if candidates:
+                                    parts = candidates[0].get("content", {}).get("parts", [])
+                                    if parts:
+                                        text = parts[0].get("text", "").strip()
+                                        if text:
+                                            print(f"[WhisperService] {model_name} transcribed: '{text}'")
+                                            return text
+                            else:
+                                print(f"[WhisperService] {model_name} returned {resp.status_code}, trying next model...")
+                        except Exception as req_err:
+                            print(f"[WhisperService] Request to {model_name} failed: {req_err}")
             except Exception as e:
                 print(f"[WhisperService] Gemini audio transcription error: {e}")
 
