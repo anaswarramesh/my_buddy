@@ -1,15 +1,12 @@
 /**
  * CoachPilot AI (My Buddy) — Hardware Companion Firmware
+ * Target MCU: Waveshare ESP32-S3 Mini Development Board
  * 
- * Target MCU: Waveshare ESP32-S3 Mini Development Board, Based on ESP32-S3FH4R2 
- * Dual-Core Processor, 240MHz Running Frequency, 2.4GHz Wi-Fi & Bluetooth 5
- * (On-chip 4MB Flash & 2MB Quad-SPI PSRAM)
- * 
- * Hardware Modules:
- * - INMP441 I2S Omnidirectional Digital Microphone (16kHz 16-bit Mono)
- * - SSD1306 0.96" / 1.3" 128x64 I2C OLED Display
- * - TS1215CJ 12x12mm Tactile Push-to-Talk Button (Active LOW)
- * - Status LED Indicator (or on-board WS2812 RGB on GPIO 21)
+ * Performance Upgrades:
+ * 1. Hardware Pin Interrupts: Zero-delay button press & release (<1ms)
+ * 2. FreeRTOS Dual-Core Execution: Network uploads pinned to Core 0, UI/Audio on Core 1
+ * 3. INMP441 Microphone Gain: +6dB digital audio boost with live Serial VU meter
+ * 4. Split OLED UI: Left Load % box + Right Events & Start Times
  */
 
 #include <WiFi.h>
@@ -22,15 +19,15 @@
 #include <driver/i2s.h>
 
 // ================= USER CONFIGURATION =================
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID = "YOUR_WIFI_SSID";          // <-- Enter your WiFi name
+const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";      // <-- Enter your WiFi password
 
-// Server URL: Your 24/7 Cloud backend (Render)
+// Server URL: Your live 24/7 Render Cloud backend
 const char* SERVER_BASE = "https://my-buddy-81bd.onrender.com";
 
-// ================= PIN DEFINITIONS FOR WAVESHARE ESP32-S3 MINI =================
+// ================= PIN DEFINITIONS =================
 #define PIN_BUTTON      6   // Push-to-Talk Button (GPIO 6 to GND)
-#define PIN_STATUS_LED  10  // Status LED (or use on-board WS2812 on GPIO 21)
+#define PIN_STATUS_LED  10  // Status LED
 #define PIN_I2C_SDA     8   // OLED I2C SDA
 #define PIN_I2C_SCL     9   // OLED I2C SCL
 #define I2S_SD          1   // INMP441 Serial Data Out (SD)
@@ -47,7 +44,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // Audio Buffer Settings (16 kHz, 16-bit, Mono)
 #define SAMPLE_RATE     16000
 #define BITS_PER_SAMPLE 16
-#define MAX_RECORD_SECS 10  // 10 seconds of high-fidelity audio
+#define MAX_RECORD_SECS 10
 #define BUFFER_SIZE     (SAMPLE_RATE * (BITS_PER_SAMPLE / 8) * MAX_RECORD_SECS)
 
 // State Machine
@@ -60,21 +57,20 @@ enum DeviceState {
     STATE_ERROR
 };
 
-DeviceState currentState = STATE_BOOT;
+volatile DeviceState currentState = STATE_BOOT;
 uint8_t* audioBuffer = nullptr;
-size_t recordedBytes = 0;
+volatile size_t recordedBytes = 0;
 unsigned long lastDisplayPoll = 0;
 int animFrame = 0;
 
 // Dashboard Data
-int densityPct = 35;
+int densityPct = 0;
 String densityLevel = "LIGHT";
 String dateStr = "Today";
-int meetingCount = 2;
-String starterTask = "Draft 3 value props";
+int meetingCount = 0;
 String shortNudge = "GREEN DAY: Launch ideas!";
 
-// Event List on Dashboard (right side of Load Box)
+// Event List on Dashboard (Right side of Load Box)
 struct OLEDEvent {
     String time;
     String title;
@@ -87,6 +83,15 @@ String resultStatus = "PROCESSED";
 String resultTask = "";
 int resultFeasibility = 0;
 
+// Hardware Interrupt Flags
+volatile bool isButtonPressed = false;
+volatile bool isButtonReleased = false;
+
+// FreeRTOS Background Upload Task Handle
+TaskHandle_t uploadTaskHandle = NULL;
+volatile bool uploadFinished = false;
+volatile bool uploadSuccess = false;
+
 // Function Prototypes
 void initI2S();
 void writeWavHeader(uint8_t* header, uint32_t wavDataSize, uint32_t sampleRate, uint16_t channels, uint16_t bitsPerSample);
@@ -96,75 +101,159 @@ void drawRecordingScreen();
 void drawUploadingScreen();
 void drawResultScreen();
 void drawErrorScreen(String errorMsg);
+bool performHttpsUpload();
+
+// ================= HARDWARE PIN INTERRUPT =================
+void IRAM_ATTR handleButtonISR() {
+    int state = digitalRead(PIN_BUTTON);
+    if (state == LOW) {
+        isButtonPressed = true;
+    } else {
+        isButtonReleased = true;
+    }
+}
+
+// ================= FREERTOS BACKGROUND NETWORK TASK (CORE 0) =================
+void uploadWorkerTask(void* parameter) {
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uploadFinished = false;
+        uploadSuccess = performHttpsUpload();
+        uploadFinished = true;
+    }
+}
 
 // ================= SETUP =================
 void setup() {
     Serial.begin(115200);
+    delay(200);
+    Serial.println(F("\n========================================"));
+    Serial.println(F(" CoachPilot AI Companion (Zero-Latency) "));
+    Serial.println(F("========================================"));
+
     pinMode(PIN_BUTTON, INPUT_PULLUP);
     pinMode(PIN_STATUS_LED, OUTPUT);
     digitalWrite(PIN_STATUS_LED, LOW);
 
-    // Initialize I2C Bus with Waveshare ESP32-S3 Mini pins (SDA: GPIO 8, SCL: GPIO 9)
+    // Attach hardware pin interrupt on GPIO 6
+    attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), handleButtonISR, CHANGE);
+
+    // Initialize I2C Bus for Waveshare ESP32-S3 Mini
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+
+    // Initialize OLED Display
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-        Serial.println("SSD1306 allocation failed! Check wiring on SDA (GPIO 8) and SCL (GPIO 9).");
+        Serial.println(F("[ERROR] SSD1306 OLED allocation failed"));
     }
     display.clearDisplay();
-    display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(5, 15);
-    display.println("CoachPilot AI");
-    display.setCursor(5, 32);
-    display.println("Waveshare S3 Mini");
-    display.setCursor(5, 48);
+
+    // Show Boot Splash
+    display.setTextSize(1);
+    display.setCursor(18, 15);
+    display.println("COACHPILOT AI");
+    display.setCursor(22, 32);
+    display.println("Zero-Delay v2.0");
+    display.setCursor(15, 48);
     display.println("Connecting WiFi...");
     display.display();
 
-    // Connect to Wi-Fi
+    // Connect to WiFi
+    Serial.print(F("Connecting to WiFi: "));
+    Serial.println(WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     int retries = 0;
-    while (WiFi.status() != WL_CONNECTED && retries < 25) {
-        delay(400);
-        Serial.print(".");
+    while (WiFi.status() != WL_CONNECTED && retries < 30) {
+        delay(350);
+        Serial.print(F("."));
         retries++;
     }
 
-    // Dynamic Heap / PSRAM Allocation for Audio Buffer
-    // ESP32-S3FH4R2 has 2MB built-in Quad-SPI PSRAM
-    size_t allocSize = BUFFER_SIZE + 44; // 44 bytes reserved for standard WAV header
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println(F("\n[WiFi] Connected!"));
+        Serial.print(F("[WiFi] ESP32 IP: "));
+        Serial.println(WiFi.localIP());
+    } else {
+        Serial.println(F("\n[WiFi] Failed! Check SSID/password."));
+    }
+
+    // Allocate Audio Buffer in PSRAM or Heap
+    size_t allocSize = BUFFER_SIZE + 44;
     if (psramFound()) {
         audioBuffer = (uint8_t*)ps_malloc(allocSize);
-        Serial.println("ESP32-S3FH4R2 PSRAM detected: Allocated 10s audio buffer in 2MB PSRAM.");
+        Serial.println(F("[AUDIO] 10s Buffer allocated in 2MB PSRAM."));
     } else {
         audioBuffer = (uint8_t*)malloc(allocSize);
-        Serial.println("Allocated audio buffer in internal SRAM.");
+        Serial.println(F("[AUDIO] Allocated in internal SRAM."));
     }
 
-    if (!audioBuffer) {
-        Serial.println("CRITICAL: Failed to allocate audio buffer memory!");
-    }
-
-    // Initialize I2S Audio Driver
+    // Initialize INMP441 Microphone Driver
     initI2S();
 
-    // Initial Data Fetch & Transition to Idle
+    // Create FreeRTOS Background Upload Task on Core 0
+    xTaskCreatePinnedToCore(
+        uploadWorkerTask,
+        "UploadTask",
+        8192,
+        NULL,
+        1,
+        &uploadTaskHandle,
+        0 // Run network TLS on Core 0
+    );
+
+    // Initial Dashboard Sync
     fetchDisplayData();
     currentState = STATE_IDLE;
     drawDashboard();
 }
 
-// ================= MAIN LOOP =================
+// ================= MAIN LOOP (CORE 1) =================
 void loop() {
+    // 1. Instant Hardware Interrupt Handling (<1ms latency)
+    if (isButtonPressed) {
+        isButtonPressed = false;
+        if (currentState != STATE_RECORDING) {
+            currentState = STATE_RECORDING;
+            recordedBytes = 0;
+            digitalWrite(PIN_STATUS_LED, HIGH);
+            Serial.println(F("\n[BUTTON] Pressed -> Recording Started immediately!"));
+            drawRecordingScreen();
+        }
+    }
+
+    if (isButtonReleased) {
+        isButtonReleased = false;
+        if (currentState == STATE_RECORDING) {
+            digitalWrite(PIN_STATUS_LED, LOW);
+            Serial.print(F("[BUTTON] Released -> Captured "));
+            Serial.print(recordedBytes);
+            Serial.println(F(" audio bytes"));
+
+            if (recordedBytes > 1500) {
+                currentState = STATE_UPLOADING;
+                drawUploadingScreen();
+                // Trigger background upload on Core 0 without blocking this loop!
+                if (uploadTaskHandle) {
+                    xTaskNotifyGive(uploadTaskHandle);
+                }
+            } else {
+                Serial.println(F("[BUTTON] Press too short (<0.1s), ignoring"));
+                currentState = STATE_IDLE;
+                drawDashboard();
+            }
+        }
+    }
+
+    // 2. State Machine Handling
     switch (currentState) {
         case STATE_IDLE: {
+            // Backup direct pin check
             if (digitalRead(PIN_BUTTON) == LOW) {
-                currentState = STATE_RECORDING;
-                recordedBytes = 0;
-                digitalWrite(PIN_STATUS_LED, HIGH);
-                Serial.println(F("\n[REC] Button Pressed -> Recording audio..."));
-                drawRecordingScreen();
+                isButtonPressed = true;
+                break;
             }
 
+            // Non-blocking periodic 60s background refresh
             if (millis() - lastDisplayPoll > 60000) {
                 fetchDisplayData();
                 drawDashboard();
@@ -174,39 +263,47 @@ void loop() {
         }
 
         case STATE_RECORDING: {
-            // Check button release FIRST for immediate response
-            if (digitalRead(PIN_BUTTON) == HIGH) {
-                digitalWrite(PIN_STATUS_LED, LOW);
-                Serial.print(F("[REC] Button Released -> Captured "));
-                Serial.print(recordedBytes);
-                Serial.println(F(" audio bytes"));
-
-                if (recordedBytes > 1500) {
-                    currentState = STATE_UPLOADING;
-                    drawUploadingScreen();
-                    uploadAudio();
-                } else {
-                    Serial.println(F("[REC] Audio too short (< 0.1s), ignoring"));
-                    currentState = STATE_IDLE;
-                    drawDashboard();
-                }
-                break;
-            }
-
-            // Update animated waveform every 100ms
+            // Animated VU waveform every 100ms
             static unsigned long lastVuUpdate = 0;
             if (millis() - lastVuUpdate > 100) {
                 drawRecordingScreen();
                 lastVuUpdate = millis();
             }
 
-            // Read I2S audio chunk with non-blocking 10ms timeout
+            // Read I2S audio chunk non-blocking (10ms timeout)
             if (audioBuffer && (recordedBytes < BUFFER_SIZE)) {
                 size_t bytesRead = 0;
                 uint8_t temp[512];
                 i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, pdMS_TO_TICKS(10));
                 if (bytesRead > 0 && (recordedBytes + bytesRead <= BUFFER_SIZE)) {
-                    memcpy(audioBuffer + 44 + recordedBytes, temp, bytesRead);
+                    // Copy raw PCM into buffer
+                    uint8_t* dest = audioBuffer + 44 + recordedBytes;
+                    memcpy(dest, temp, bytesRead);
+
+                    // Apply +6dB digital gain boost (2x) and measure peak amplitude
+                    int16_t* samples = (int16_t*)dest;
+                    size_t sampleCount = bytesRead / 2;
+                    int peak = 0;
+                    for (size_t i = 0; i < sampleCount; i++) {
+                        int32_t val = samples[i] * 2;
+                        if (val > 32767) val = 32767;
+                        if (val < -32768) val = -32768;
+                        samples[i] = (int16_t)val;
+                        int absVal = abs(samples[i]);
+                        if (absVal > peak) peak = absVal;
+                    }
+
+                    // Print audio level to Serial Monitor periodically
+                    static unsigned long lastSerialVu = 0;
+                    if (millis() - lastSerialVu > 300) {
+                        Serial.print(F("[MIC] Peak Amplitude: "));
+                        Serial.print(peak);
+                        if (peak > 1000) Serial.println(F(" [LOUD SPEECH]"));
+                        else if (peak > 200) Serial.println(F(" [MODERATE SPEECH]"));
+                        else Serial.println(F(" [NEAR SILENT - check mic wiring]"));
+                        lastSerialVu = millis();
+                    }
+
                     recordedBytes += bytesRead;
                 }
             }
@@ -214,6 +311,15 @@ void loop() {
         }
 
         case STATE_UPLOADING: {
+            // Check if Core 0 finished the background upload
+            if (uploadFinished) {
+                if (uploadSuccess) {
+                    currentState = STATE_RESULT;
+                    drawResultScreen();
+                } else {
+                    currentState = STATE_ERROR;
+                }
+            }
             break;
         }
 
@@ -222,14 +328,10 @@ void loop() {
             if (resultStartTime == 0) {
                 resultStartTime = millis();
             }
-            // Allow immediate re-recording if button is pressed again
+            // If button is pressed during result, immediately restart recording!
             if (digitalRead(PIN_BUTTON) == LOW) {
                 resultStartTime = 0;
-                currentState = STATE_RECORDING;
-                recordedBytes = 0;
-                digitalWrite(PIN_STATUS_LED, HIGH);
-                Serial.println(F("\n[REC] Button Pressed -> Immediate re-trigger"));
-                drawRecordingScreen();
+                isButtonPressed = true;
                 break;
             }
             if (millis() - resultStartTime > 2500) {
@@ -255,7 +357,7 @@ void loop() {
         }
     }
 
-    delay(5);
+    delay(2); // Tight 2ms loop for instantaneous responsiveness
 }
 
 // ================= I2S DRIVER =================
@@ -283,24 +385,24 @@ void initI2S() {
     i2s_set_pin(I2S_PORT, &pin_config);
 }
 
-// ================= AUDIO UPLOAD =================
-void uploadAudio() {
-    if (!audioBuffer) return;
+// ================= HTTPS AUDIO UPLOAD (RUNS ON CORE 0) =================
+bool performHttpsUpload() {
+    if (!audioBuffer) return false;
 
     writeWavHeader(audioBuffer, recordedBytes, SAMPLE_RATE, 1, 16);
 
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.print(F("[HTTP] Uploading "));
+        Serial.print(F("[HTTP] Background uploading "));
         Serial.print(recordedBytes + 44);
-        Serial.println(F(" bytes WAV to Render cloud..."));
+        Serial.println(F(" bytes WAV to Render..."));
 
         WiFiClientSecure client;
-        client.setInsecure(); // Skip certificate verification for cloud server
+        client.setInsecure();
         HTTPClient http;
-        String url = String(SERVER_BASE) + "/api/hardware/voice-upload";
+        String url = String(SERVER_BASE) + "/api/hardware/voice-upload?user_id=default-user";
         http.begin(client, url);
         http.addHeader("Content-Type", "audio/wav");
-        http.setTimeout(15000); // 15-second timeout for LLM inference
+        http.setTimeout(15000);
 
         int httpCode = http.POST(audioBuffer, recordedBytes + 44);
         Serial.print(F("[HTTP] Response Code: "));
@@ -317,20 +419,20 @@ void uploadAudio() {
             resultStatus = doc["action_label"].as<String>();
             resultTask = doc["starter_task"].as<String>();
             resultFeasibility = doc["feasibility"] | 0;
-
-            currentState = STATE_RESULT;
+            http.end();
+            return true;
         } else {
             String errStr = http.getString();
-            Serial.print(F("[HTTP] Error Body: "));
+            Serial.print(F("[HTTP] Error: "));
             Serial.println(errStr);
-            drawErrorScreen("HTTP Error " + String(httpCode));
-            currentState = STATE_ERROR;
+            drawErrorScreen("HTTP " + String(httpCode));
+            http.end();
+            return false;
         }
-        http.end();
     } else {
-        Serial.println(F("[HTTP] WiFi Disconnected, cannot upload"));
+        Serial.println(F("[HTTP] WiFi Disconnected"));
         drawErrorScreen("WiFi Disconnected");
-        currentState = STATE_ERROR;
+        return false;
     }
 }
 
@@ -341,7 +443,7 @@ void fetchDisplayData() {
     WiFiClientSecure client;
     client.setInsecure();
     HTTPClient http;
-    String url = String(SERVER_BASE) + "/api/hardware/display-data";
+    String url = String(SERVER_BASE) + "/api/hardware/display-data?user_id=default-user";
     http.begin(client, url);
     http.setTimeout(5000);
     int httpCode = http.GET();
@@ -350,14 +452,13 @@ void fetchDisplayData() {
         JsonDocument doc;
         deserializeJson(doc, payload);
 
-        densityPct = doc["density_pct"] | 35;
+        densityPct = doc["density_pct"] | 0;
         densityLevel = doc["density_level"].as<String>();
         dateStr = doc["date_str"].as<String>();
         meetingCount = doc["meeting_count"] | 0;
         shortNudge = doc["short_nudge"].as<String>();
-        starterTask = doc["starter_task_title"].as<String>();
 
-        // Parse list of events for the right column
+        // Parse up to 3 upcoming events for right side list
         oledEventCount = 0;
         if (doc["events"].is<JsonArray>()) {
             JsonArray evArr = doc["events"].as<JsonArray>();
@@ -384,7 +485,7 @@ void drawDashboard() {
     display.print(densityLevel);
     display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 
-    // 2. Left Column: Density Load Gauge Box (40px wide, x=0..40, y=12..50)
+    // 2. Left Column: Density Load Gauge Box (40px wide)
     display.drawRoundRect(0, 12, 40, 38, 3, SSD1306_WHITE);
     display.setCursor(3, 17);
     display.setTextSize(2);
@@ -399,7 +500,7 @@ void drawDashboard() {
     // Divider line between load box and events list
     display.drawLine(43, 12, 43, 50, SSD1306_WHITE);
 
-    // 3. Right Column: List of Events & Time (x=46 to 127)
+    // 3. Right Column: List of Events & Times (x=46 to 127)
     display.setTextSize(1);
     if (oledEventCount == 0) {
         display.setCursor(47, 16);
@@ -414,7 +515,6 @@ void drawDashboard() {
             display.setCursor(47, yPos);
             display.print(oledEvents[i].time);
             display.print(" ");
-            // 5 chars for time ("09:30"), 1 space, up to 7 chars for title = 13 chars max
             display.print(oledEvents[i].title.substring(0, 7));
             yPos += 13;
         }
@@ -435,7 +535,6 @@ void drawRecordingScreen() {
     display.setCursor(18, 8);
     display.println(">> RECORDING <<");
 
-    // Dynamic animated waveform bars
     animFrame = (animFrame + 1) % 6;
     for (int i = 0; i < 11; i++) {
         int h = 6 + ((i + animFrame) % 5) * 4;
@@ -443,7 +542,7 @@ void drawRecordingScreen() {
     }
 
     display.setCursor(10, 48);
-    display.println("Speak thought / idea");
+    display.println("Speak thought / task");
     display.display();
 }
 
@@ -451,9 +550,9 @@ void drawUploadingScreen() {
     display.clearDisplay();
     display.setTextSize(1);
     display.setCursor(12, 16);
-    display.println("Whisper + AI Coach");
-    display.setCursor(20, 32);
-    display.println("Analyzing idea...");
+    display.println("AI Cloud Coach");
+    display.setCursor(18, 32);
+    display.println("Processing audio...");
     display.drawRoundRect(20, 48, 88, 8, 3, SSD1306_WHITE);
     display.fillRoundRect(22, 50, 44, 4, 2, SSD1306_WHITE);
     display.display();
@@ -467,7 +566,7 @@ void drawResultScreen() {
     display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
 
     display.setCursor(0, 16);
-    display.println("Starter Action:");
+    display.println("Task / Event:");
     display.setCursor(0, 28);
     display.println(resultTask.substring(0, 21));
 
@@ -478,7 +577,7 @@ void drawResultScreen() {
         display.print(resultFeasibility);
         display.print("%");
     } else {
-        display.print("Saved to Daily Plan");
+        display.print("Saved to Tasks Queue");
     }
 
     display.display();

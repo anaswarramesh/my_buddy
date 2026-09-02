@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Request, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from datetime import date, timedelta
 from typing import Dict, Any, List, Optional
 import io
+import os
 import struct
+
+LATEST_AUDIO_PATH = "/tmp/latest_hardware_voice.wav"
 
 from app.database import get_db
 from app.models.task import Task
@@ -119,6 +123,16 @@ async def voice_diagnostics(request: Request):
             result["gemini_error"] = str(e)
     return result
 
+@router.get("/latest-audio")
+def get_latest_hardware_audio():
+    """
+    Streams the most recent audio recording uploaded by the ESP32 hardware
+    so the user can listen to microphone quality directly in browser.
+    """
+    if os.path.exists(LATEST_AUDIO_PATH):
+        return FileResponse(LATEST_AUDIO_PATH, media_type="audio/wav", filename="latest_hardware_voice.wav")
+    raise HTTPException(status_code=404, detail="No audio recorded yet. Hold the button and speak into the ESP32 mic first.")
+
 @router.post("/voice-upload")
 async def handle_hardware_voice_upload(
     request: Request,
@@ -134,10 +148,36 @@ async def handle_hardware_voice_upload(
         if not body or len(body) < 100:
             raise HTTPException(status_code=400, detail="Audio buffer empty or too short.")
 
+        # Persist latest audio for in-browser listening and debugging
+        try:
+            with open(LATEST_AUDIO_PATH, "wb") as f:
+                f.write(body)
+        except Exception as e:
+            print(f"[Hardware] Could not save debug audio: {e}")
+
+        # Check peak amplitude to detect silence / disconnected mic
+        max_amp = 0
+        data_offset = 44 if body.startswith(b"RIFF") else 0
+        raw_pcm = body[data_offset:]
+        if len(raw_pcm) >= 2:
+            sample_count = len(raw_pcm) // 2
+            samples = struct.unpack(f"<{sample_count}h", raw_pcm[:sample_count*2])
+            max_amp = max(abs(s) for s in samples) if samples else 0
+        print(f"[Hardware] Voice upload received: {len(body)} bytes, Peak Amp: {max_amp}")
+
         # Transcribe via Whisper / Gemini
         transcript = await WhisperService.transcribe_audio(audio_bytes=body)
         if not transcript:
-            transcript = "I want to build an automated AI client intake system that summarizes legal inquiries."
+            if max_amp < 150:
+                # Microphone is picking up near pure silence
+                return {
+                    "status": "warning",
+                    "action_label": "MIC SILENT",
+                    "transcript": "No sound detected (check INMP441 wiring)",
+                    "starter_task": "Check Mic Pins/Gain",
+                    "feasibility": None
+                }
+            transcript = "Review daily schedule and tasks"
 
         # Ensure user exists
         user = db.query(User).filter(User.id == user_id).first()
