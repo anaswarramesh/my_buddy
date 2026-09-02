@@ -95,9 +95,16 @@ async def voice_diagnostics(request: Request):
     }
     if settings.gemini_api_key and len(body) > 200:
         import httpx
+        models = [
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-2.5-flash-lite",
+            "gemini-pro-latest",
+            "gemini-3.6-flash"
+        ]
+        result["attempts"] = []
         try:
             encoded_audio = base64.b64encode(body).decode("utf-8")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={settings.gemini_api_key}"
             payload = {
                 "contents": [
                     {
@@ -109,16 +116,34 @@ async def voice_diagnostics(request: Request):
                                 }
                             },
                             {
-                                "text": "Transcribe the spoken audio into text verbatim."
+                                "text": "Transcribe the spoken audio verbatim into English text. Return ONLY the transcribed words."
                             }
                         ]
                     }
                 ]
             }
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(url, json=payload)
-                result["gemini_status"] = resp.status_code
-                result["gemini_resp"] = resp.text[:1000]
+                for m in models:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={settings.gemini_api_key}"
+                    try:
+                        resp = await client.post(url, json=payload)
+                        attempt = {"model": m, "status": resp.status_code}
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    attempt["text"] = parts[0].get("text", "")
+                        else:
+                            attempt["error"] = resp.text[:200]
+                        result["attempts"].append(attempt)
+                        if "text" in attempt and attempt["text"].strip():
+                            result["successful_model"] = m
+                            result["transcript"] = attempt["text"].strip()
+                            break
+                    except Exception as me:
+                        result["attempts"].append({"model": m, "error": str(me)})
         except Exception as e:
             result["gemini_error"] = str(e)
     return result
@@ -167,7 +192,7 @@ async def handle_hardware_voice_upload(
 
         # Transcribe via Whisper / Gemini
         transcript = await WhisperService.transcribe_audio(audio_bytes=body)
-        if not transcript:
+        if not transcript or not transcript.strip():
             if max_amp < 150:
                 # Microphone is picking up near pure silence
                 return {
@@ -177,7 +202,13 @@ async def handle_hardware_voice_upload(
                     "starter_task": "Check Mic Pins/Gain",
                     "feasibility": None
                 }
-            transcript = "Review daily schedule and tasks"
+            return {
+                "status": "warning",
+                "action_label": "VOICE UNCLEAR",
+                "transcript": "Could not recognize words - speak louder/closer",
+                "starter_task": "Speak closer to mic",
+                "feasibility": None
+            }
 
         # Ensure user exists
         user = db.query(User).filter(User.id == user_id).first()

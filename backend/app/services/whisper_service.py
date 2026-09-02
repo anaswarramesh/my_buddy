@@ -91,5 +91,5 @@ class WhisperService:
             except Exception as e:
                 print(f"[WhisperService] External Whisper call failed: {e}")
 
-        # Fallback default transcription for quick demo/testing
-        return "I have an idea for an automated AI client intake system that summarizes legal inquiries before consultation calls."
+        # Return empty string if no transcription could be completed
+        return ""
