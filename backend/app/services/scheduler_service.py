@@ -38,7 +38,7 @@ class SchedulerService:
                 if window.duration_minutes >= task.estimated_minutes:
                     # Calculate start and end datetime
                     h_start, m_start = map(int, window.start_time.split(":"))
-                    start_dt = datetime.combine(target_date, time(h_start, m_start))
+                    start_dt = datetime.combine(cur_date, time(h_start, m_start))
                     end_dt = start_dt + timedelta(minutes=task.estimated_minutes)
 
                     # Create the calendar event
