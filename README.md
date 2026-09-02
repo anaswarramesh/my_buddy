@@ -397,11 +397,15 @@ Deploy the backend to **Render.com** (or Fly.io / Railway) for free in 3 minutes
 2. Connect your GitHub repository (`anaswarramesh/my_buddy`).
 3. Configure:
    - **Environment:** `Python`
-   - **Build Command:** `pip install -r backend/requirements.txt`
+   - **Root Directory:** `backend` *(⚠️ Important: sets the working folder to backend)*
+   - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   *(Alternative if Root Directory is left empty: Start Command = `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`)*
 4. Add your API Keys in **Environment Variables**:
    - `GEMINI_API_KEY`: `your_gemini_api_key`
    - `LLM_PROVIDER`: `gemini`
+   - `GOOGLE_CLIENT_ID`: `your_client_id` (optional, for Google Calendar)
+   - `GOOGLE_CLIENT_SECRET`: `your_client_secret` (optional, for Google Calendar)
 5. Copy your live Render URL (e.g., `https://coachpilot-backend.onrender.com`) and paste it into `SERVER_BASE` in the ESP32 firmware.
 
 ---

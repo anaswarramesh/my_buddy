@@ -168,8 +168,10 @@ Deploying the FastAPI backend to the cloud ensures your Waveshare ESP32-S3 Mini 
 3. Select your repository (`anaswarramesh/my_buddy`).
 4. Set the following:
    - **Environment:** `Python`
-   - **Build Command:** `pip install -r backend/requirements.txt`
+   - **Root Directory:** `backend` *(⚠️ Sets working directory to backend)*
+   - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   *(Or if Root Directory is left blank: Start Command = `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`)*
 5. Add Environment Variables:
    - `GEMINI_API_KEY`: `your_gemini_api_key` (or `OPENAI_API_KEY`)
    - `LLM_PROVIDER`: `gemini` (or `openai`)
