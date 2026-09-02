@@ -31,8 +31,8 @@ class WhisperService:
                         {
                             "parts": [
                                 {
-                                    "inlineData": {
-                                        "mimeType": "audio/wav",
+                                    "inline_data": {
+                                        "mime_type": "audio/wav",
                                         "data": encoded_audio
                                     }
                                 },

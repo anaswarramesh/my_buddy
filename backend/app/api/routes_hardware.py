@@ -89,20 +89,34 @@ async def voice_diagnostics(request: Request):
         "gemini_api_key_set": bool(settings.gemini_api_key),
         "openai_api_key_set": bool(settings.openai_api_key)
     }
-    if settings.gemini_api_key:
+    if settings.gemini_api_key and len(body) > 200:
         import httpx
         try:
-            # Query supported models
-            list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={settings.gemini_api_key}"
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(list_url)
-                if resp.status_code == 200:
-                    models_data = resp.json().get("models", [])
-                    result["available_models"] = [m.get("name") for m in models_data if "flash" in m.get("name", "").lower() or "gemini" in m.get("name", "").lower()][:10]
-                else:
-                    result["models_error"] = resp.text
+            encoded_audio = base64.b64encode(body).decode("utf-8")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={settings.gemini_api_key}"
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "inline_data": {
+                                    "mime_type": "audio/wav",
+                                    "data": encoded_audio
+                                }
+                            },
+                            {
+                                "text": "Transcribe the spoken audio into text verbatim."
+                            }
+                        ]
+                    }
+                ]
+            }
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, json=payload)
+                result["gemini_status"] = resp.status_code
+                result["gemini_resp"] = resp.text[:1000]
         except Exception as e:
-            result["list_models_error"] = str(e)
+            result["gemini_error"] = str(e)
     return result
 
 @router.post("/voice-upload")
