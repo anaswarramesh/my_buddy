@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Request, HTTPException
 from sqlalchemy.orm import Session
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict, Any, List, Optional
 import io
 import struct
@@ -145,6 +145,14 @@ async def handle_hardware_voice_upload(
                 target_task_title = t.title
 
         db.commit()
+
+        # Automatically schedule Step 1 ignition action into the next open focus window!
+        starter_db_task = db.query(Task).filter(Task.idea_id == idea_db.id, Task.is_starter_step == True).first()
+        if starter_db_task:
+            cal_event = SchedulerService.auto_schedule_task(db, user.id, starter_db_task)
+            if cal_event:
+                target_task_title = f"{cal_event.start_time.strftime('%H:%M')} {starter_db_task.title}"
+
         action_label = f"IDEA: {result.idea_analysis.feasibility_score}% Feasible"
 
     elif result.classification == "IMMEDIATE_TASK":
@@ -159,12 +167,36 @@ async def handle_hardware_voice_upload(
                 status="pending"
             )
             db.add(task_db)
-            target_task_title = t.title
-        db.commit()
-        action_label = "TASK LOGGED"
+            db.commit()
+            db.refresh(task_db)
+
+            # Auto-schedule task into calendar
+            cal_event = SchedulerService.auto_schedule_task(db, user.id, task_db)
+            if cal_event:
+                target_task_title = f"{cal_event.start_time.strftime('%H:%M')} {task_db.title}"
+            else:
+                target_task_title = task_db.title
+        action_label = "TASK BOOKED"
 
     elif result.classification == "CALENDAR_COMMAND":
-        action_label = "CALENDAR UPDATED"
+        today = date.today()
+        snapshots = []
+        for offset in range(7):
+            cur_date = today + timedelta(days=offset)
+            events = CalendarService.get_events_for_range(db, user.id, cur_date, cur_date)
+            d_res = DensityService.calculate_day_density(cur_date, events)
+            snapshots.append(d_res.model_dump())
+
+        tasks = db.query(Task).filter(Task.user_id == user.id, Task.status != "completed").limit(5).all()
+        tasks_dicts = [{"id": t.id, "title": t.title, "friction": t.friction_level} for t in tasks]
+
+        nlp_res = await LLMService.analyze_density_and_nlp(
+            command=transcript,
+            density_snapshots=snapshots,
+            existing_tasks=tasks_dicts
+        )
+        action_label = "CALENDAR SHIFTED"
+        target_task_title = nlp_res.nlp_summary[:24]
 
     # Return compact feedback for OLED screen
     return {

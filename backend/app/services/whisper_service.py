@@ -19,7 +19,47 @@ class WhisperService:
             except Exception as e:
                 print(f"[WhisperService] Base64 decode error: {e}")
 
-        # If external API keys are configured, call OpenAI Whisper endpoint
+        # Try Gemini multimodal audio transcription if gemini_api_key is set
+        if settings.gemini_api_key and audio_bytes and len(audio_bytes) > 200:
+            try:
+                import httpx
+                encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.gemini_api_key}"
+                payload = {
+                    "contents": [
+                        {
+                            "parts": [
+                                {
+                                    "inlineData": {
+                                        "mimeType": "audio/wav",
+                                        "data": encoded_audio
+                                    }
+                                },
+                                {
+                                    "text": "Transcribe the spoken audio into English text. Return ONLY the verbatim transcribed words without any markdown, quotes, notes, or explanations. If completely silent, return an empty string."
+                                }
+                            ]
+                        }
+                    ]
+                }
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            if parts:
+                                text = parts[0].get("text", "").strip()
+                                if text:
+                                    print(f"[WhisperService] Gemini transcribed: '{text}'")
+                                    return text
+                    else:
+                        print(f"[WhisperService] Gemini API returned {resp.status_code}: {resp.text}")
+            except Exception as e:
+                print(f"[WhisperService] Gemini audio transcription error: {e}")
+
+        # If external OpenAI API key is configured, call OpenAI Whisper endpoint
         if settings.openai_api_key and audio_bytes:
             try:
                 import httpx
