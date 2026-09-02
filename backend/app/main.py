@@ -35,8 +35,7 @@ async def lifespan(app: FastAPI):
             )
             db.add(user)
             db.commit()
-            CalendarService.seed_demo_calendar(db, user.id)
-            print("[Startup] Seeded default user and calendar density blocks.")
+            print("[Startup] Initialized default user Alex Builder.")
     finally:
         db.close()
     yield
