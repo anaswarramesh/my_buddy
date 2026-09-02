@@ -439,11 +439,12 @@ bool performHttpsUpload() {
 
         WiFiClientSecure client;
         client.setInsecure();
+        client.setTimeout(35);
         HTTPClient http;
         String url = String(SERVER_BASE) + "/api/hardware/voice-upload?user_id=default-user";
         http.begin(client, url);
         http.addHeader("Content-Type", "audio/wav");
-        http.setTimeout(15000);
+        http.setTimeout(35000); // 35-second timeout for full Gemini AI transcription
 
         int httpCode = http.POST(audioBuffer, recordedBytes + 44);
         Serial.print(F("[HTTP] Response Code: "));
