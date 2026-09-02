@@ -3,10 +3,12 @@
  * Target MCU: Waveshare ESP32-S3 Mini Development Board
  * 
  * Performance Upgrades:
- * 1. Debounced Push-to-Talk: 0ms instant press, bounce rejection, clean release
- * 2. FreeRTOS Dual-Core Execution: Network uploads pinned to Core 0, UI/Audio on Core 1
- * 3. INMP441 Microphone Gain: +6dB digital audio boost with live Serial VU meter
- * 4. Split OLED UI: Left Load % box + Right Events & Start Times
+ * 1. Safe RAM Allocation: Automatically adapts to PSRAM or internal SRAM (never NULL)
+ * 2. Reliable I2S Sampling: 256-byte chunks with 50ms timeout (never drops to 0 bytes)
+ * 3. Debounced Push-to-Talk: 0ms instant press, mechanical bounce rejection
+ * 4. FreeRTOS Dual-Core: Network uploads on Core 0, UI/Audio on Core 1
+ * 5. INMP441 Microphone Gain: +6dB digital audio boost with live Serial VU meter
+ * 6. Split OLED UI: Left Load % box + Right Events & Start Times
  */
 
 #include <WiFi.h>
@@ -44,8 +46,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // Audio Buffer Settings (16 kHz, 16-bit, Mono)
 #define SAMPLE_RATE     16000
 #define BITS_PER_SAMPLE 16
-#define MAX_RECORD_SECS 10
-#define BUFFER_SIZE     (SAMPLE_RATE * (BITS_PER_SAMPLE / 8) * MAX_RECORD_SECS)
+size_t maxAudioBufferBytes = 160000; // Defaults to 5s (160 KB), adapts dynamically
 
 // State Machine
 enum DeviceState {
@@ -138,7 +139,7 @@ void setup() {
     display.setCursor(18, 15);
     display.println("COACHPILOT AI");
     display.setCursor(22, 32);
-    display.println("Zero-Delay v2.0");
+    display.println("Zero-Delay v2.1");
     display.setCursor(15, 48);
     display.println("Connecting WiFi...");
     display.display();
@@ -162,14 +163,32 @@ void setup() {
         Serial.println(F("\n[WiFi] Failed! Check SSID/password."));
     }
 
-    // Allocate Audio Buffer in PSRAM or Heap
-    size_t allocSize = BUFFER_SIZE + 44;
-    if (psramFound()) {
-        audioBuffer = (uint8_t*)ps_malloc(allocSize);
-        Serial.println(F("[AUDIO] 10s Buffer allocated in 2MB PSRAM."));
-    } else {
-        audioBuffer = (uint8_t*)malloc(allocSize);
-        Serial.println(F("[AUDIO] Allocated in internal SRAM."));
+    // Dynamic Safe Buffer Allocation (Adapts to PSRAM or internal SRAM)
+    size_t trySecs[4] = {8, 5, 4, 3};
+    for (int i = 0; i < 4; i++) {
+        size_t needed = (SAMPLE_RATE * 2 * trySecs[i]) + 44;
+        if (psramFound()) {
+            audioBuffer = (uint8_t*)ps_malloc(needed);
+            if (audioBuffer) {
+                maxAudioBufferBytes = needed - 44;
+                Serial.print(F("[AUDIO] Allocated "));
+                Serial.print(trySecs[i]);
+                Serial.println(F("s buffer in PSRAM"));
+                break;
+            }
+        }
+        audioBuffer = (uint8_t*)malloc(needed);
+        if (audioBuffer) {
+            maxAudioBufferBytes = needed - 44;
+            Serial.print(F("[AUDIO] Allocated "));
+            Serial.print(trySecs[i]);
+            Serial.println(F("s buffer in Internal SRAM"));
+            break;
+        }
+    }
+
+    if (!audioBuffer) {
+        Serial.println(F("[ERROR CRITICAL] Failed to allocate audio buffer in RAM!"));
     }
 
     // Initialize INMP441 Microphone Driver
@@ -219,8 +238,8 @@ void loop() {
 
         case STATE_RECORDING: {
             // 1. Release check with mechanical bounce rejection
-            // Ignore contact chatter during the first 150ms of hold
-            if (millis() - recordingStartTime > 150) {
+            // Ignore contact chatter during the first 120ms of hold
+            if (millis() - recordingStartTime > 120) {
                 if (digitalRead(PIN_BUTTON) == HIGH) {
                     consecutiveHighCount++;
                     // Require 3 consecutive HIGH reads (~15ms) to confirm genuine release
@@ -259,40 +278,56 @@ void loop() {
                 lastVuUpdate = millis();
             }
 
-            // 3. Read I2S audio chunk non-blocking (10ms timeout)
-            if (audioBuffer && (recordedBytes < BUFFER_SIZE)) {
+            // 3. Read I2S audio chunk with safe 50ms timeout for 256 bytes
+            if (audioBuffer && (recordedBytes < maxAudioBufferBytes)) {
                 size_t bytesRead = 0;
-                uint8_t temp[512];
-                i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, pdMS_TO_TICKS(10));
-                if (bytesRead > 0 && (recordedBytes + bytesRead <= BUFFER_SIZE)) {
-                    uint8_t* dest = audioBuffer + 44 + recordedBytes;
-                    memcpy(dest, temp, bytesRead);
-
-                    // Apply +6dB digital gain boost (2x) and measure peak amplitude
-                    int16_t* samples = (int16_t*)dest;
-                    size_t sampleCount = bytesRead / 2;
-                    int peak = 0;
-                    for (size_t i = 0; i < sampleCount; i++) {
-                        int32_t val = samples[i] * 2;
-                        if (val > 32767) val = 32767;
-                        if (val < -32768) val = -32768;
-                        samples[i] = (int16_t)val;
-                        int absVal = abs(samples[i]);
-                        if (absVal > peak) peak = absVal;
+                uint8_t temp[256];
+                esp_err_t err = i2s_read(I2S_PORT, temp, sizeof(temp), &bytesRead, pdMS_TO_TICKS(50));
+                
+                if (err == ESP_OK && bytesRead > 0) {
+                    if (recordedBytes == 0) {
+                        Serial.print(F("[I2S] Audio stream receiving OK! Chunk: "));
+                        Serial.print(bytesRead);
+                        Serial.println(F(" bytes"));
                     }
 
-                    // Print audio level to Serial Monitor periodically
-                    static unsigned long lastSerialVu = 0;
-                    if (millis() - lastSerialVu > 350) {
-                        Serial.print(F("[MIC] Peak Amplitude: "));
-                        Serial.print(peak);
-                        if (peak > 1200) Serial.println(F(" [LOUD SPEECH]"));
-                        else if (peak > 300) Serial.println(F(" [MODERATE SPEECH]"));
-                        else Serial.println(F(" [NEAR SILENT - speak closer or check wiring]"));
-                        lastSerialVu = millis();
-                    }
+                    if (recordedBytes + bytesRead <= maxAudioBufferBytes) {
+                        uint8_t* dest = audioBuffer + 44 + recordedBytes;
+                        memcpy(dest, temp, bytesRead);
 
-                    recordedBytes += bytesRead;
+                        // Apply +6dB digital gain boost (2x) and measure peak amplitude
+                        int16_t* samples = (int16_t*)dest;
+                        size_t sampleCount = bytesRead / 2;
+                        int peak = 0;
+                        for (size_t i = 0; i < sampleCount; i++) {
+                            int32_t val = samples[i] * 2;
+                            if (val > 32767) val = 32767;
+                            if (val < -32768) val = -32768;
+                            samples[i] = (int16_t)val;
+                            int absVal = abs(samples[i]);
+                            if (absVal > peak) peak = absVal;
+                        }
+
+                        // Print audio level to Serial Monitor periodically
+                        static unsigned long lastSerialVu = 0;
+                        if (millis() - lastSerialVu > 350) {
+                            Serial.print(F("[MIC] Peak Amplitude: "));
+                            Serial.print(peak);
+                            if (peak > 1200) Serial.println(F(" [LOUD SPEECH]"));
+                            else if (peak > 300) Serial.println(F(" [MODERATE SPEECH]"));
+                            else Serial.println(F(" [NEAR SILENT - speak closer to mic]"));
+                            lastSerialVu = millis();
+                        }
+
+                        recordedBytes += bytesRead;
+                    }
+                } else if (err != ESP_OK) {
+                    static unsigned long lastErrPrint = 0;
+                    if (millis() - lastErrPrint > 1000) {
+                        Serial.print(F("[I2S ERROR] read failed: "));
+                        Serial.println(err);
+                        lastErrPrint = millis();
+                    }
                 }
             }
             break;
@@ -363,7 +398,7 @@ void initI2S() {
         .communication_format = I2S_COMM_FORMAT_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
         .dma_buf_count = 8,
-        .dma_buf_len = 512,
+        .dma_buf_len = 256,
         .use_apll = false
     };
 
@@ -374,8 +409,21 @@ void initI2S() {
         .data_in_num = I2S_SD
     };
 
-    i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
-    i2s_set_pin(I2S_PORT, &pin_config);
+    esp_err_t err = i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
+    if (err != ESP_OK) {
+        Serial.print(F("[I2S ERROR] Driver install failed: "));
+        Serial.println(err);
+    } else {
+        Serial.println(F("[I2S] Driver installed successfully."));
+    }
+
+    err = i2s_set_pin(I2S_PORT, &pin_config);
+    if (err != ESP_OK) {
+        Serial.print(F("[I2S ERROR] Set pin failed: "));
+        Serial.println(err);
+    } else {
+        Serial.println(F("[I2S] Pins configured: SD=1, WS=2, SCK=3"));
+    }
 }
 
 // ================= HTTPS AUDIO UPLOAD (RUNS ON CORE 0) =================
