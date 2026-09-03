@@ -77,24 +77,27 @@ async def get_hardware_display_data(user_id: str = "default-user", db: Session =
         Task.status.in_(["pending", "scheduled"])
     ).limit(4).all()
 
-    # Calculate combined committed minutes
-    event_mins = sum(int((e.end_time - e.start_time).total_seconds() / 60) for e in events)
-    task_mins = sum(t.estimated_minutes for t in scheduled_tasks)
-    total_committed = event_mins + task_mins
-    
-    # Work day = 540 minutes (9 hours)
-    density_pct = min(100, int((total_committed / 540.0) * 100))
-    if density_pct >= 75:
-        density_level = "HEAVY"
+    # Calculate density using the exact same DensityService as Web UI (including switch penalties)
+    density_events = list(events)
+    for t in scheduled_tasks:
+        if t.scheduled_start and t.scheduled_end:
+            density_events.append({
+                "start_time": t.scheduled_start,
+                "end_time": t.scheduled_end,
+                "cognitive_weight": 1.0,
+                "is_all_day": False
+            })
+    density_res = DensityService.calculate_day_density(today, density_events)
+    density_pct = int(density_res.density_score * 100)
+    density_level = density_res.density_level.upper()
+
+    if density_level in ["DENSE", "OVERLOADED"]:
         short_nudge = "HEAVY DAY: Protect focus"
-    elif density_pct >= 40:
-        density_level = "MODERATE"
+    elif density_level == "MODERATE":
         short_nudge = "BALANCED: 90m Focus slot"
-    elif density_pct > 0:
-        density_level = "LIGHT"
+    elif density_level == "LIGHT":
         short_nudge = "GREEN DAY: Focus on tasks"
     else:
-        density_level = "CLEAR"
         short_nudge = "CLEAR DAY: Speak new tasks"
 
     # Merge calendar events and scheduled tasks into a unified timeline
