@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 import io
 import os
 import struct
+import re
 
 LATEST_AUDIO_PATH = "/tmp/latest_hardware_voice.wav"
 
@@ -292,6 +293,105 @@ async def handle_hardware_voice_upload(
             user = User(id=user_id, email="builder@coachpilot.ai", full_name="Alex Builder")
             db.add(user)
             db.commit()
+
+        # Check if voice command is asking to cancel or delete an event/task
+        lower_transcript = transcript.lower()
+        cancel_keywords = ["cancel", "delete", "remove", "drop", "clear"]
+        if any(cw in lower_transcript for cw in cancel_keywords):
+            today_start = datetime.combine(date.today(), time(0, 0, 0))
+            today_end = datetime.combine(date.today(), time(23, 59, 59))
+            
+            # Match time if stated (e.g. "at 4 PM" -> 16:00)
+            time_match = re.search(r"\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", lower_transcript)
+            matched_time_str = None
+            if time_match:
+                h_str, m_str, am_pm = time_match.groups()
+                h = int(h_str)
+                m = int(m_str) if m_str else 0
+                if am_pm == "pm" and h < 12:
+                    h += 12
+                elif am_pm == "am" and h == 12:
+                    h = 0
+                elif not am_pm and h < 8:
+                    h += 12
+                matched_time_str = f"{h:02d}:{m:02d}"
+
+            deleted_title = ""
+
+            # Check tasks first
+            tasks_today = db.query(Task).filter(
+                Task.user_id == user.id,
+                Task.status.in_(["pending", "scheduled"])
+            ).all()
+
+            target_task = None
+            for t in tasks_today:
+                if matched_time_str and t.scheduled_start and t.scheduled_start.strftime("%H:%M") == matched_time_str:
+                    target_task = t
+                    break
+                words = [w for w in re.findall(r"\w+", lower_transcript) if len(w) > 3 and w not in cancel_keywords]
+                if any(w in t.title.lower() for w in words):
+                    target_task = t
+                    break
+
+            if target_task:
+                deleted_title = target_task.title
+                db.delete(target_task)
+                db.commit()
+
+            # Check calendar events
+            events_today = db.query(CalendarEvent).filter(
+                CalendarEvent.user_id == user.id,
+                CalendarEvent.start_time >= today_start,
+                CalendarEvent.start_time <= today_end
+            ).all()
+
+            target_event = None
+            for ev in events_today:
+                if matched_time_str and ev.start_time.strftime("%H:%M") == matched_time_str:
+                    target_event = ev
+                    break
+                words = [w for w in re.findall(r"\w+", lower_transcript) if len(w) > 3 and w not in cancel_keywords]
+                if any(w in ev.title.lower() for w in words):
+                    target_event = ev
+                    break
+
+            if target_event:
+                deleted_title = target_event.title
+                if target_event.external_event_id:
+                    try:
+                        g_token = await CalendarService.get_valid_google_token(db, user.id)
+                        if g_token:
+                            await CalendarService.delete_google_event(g_token, target_event.external_event_id)
+                    except Exception as ge:
+                        print(f"[Google Delete] Error: {ge}")
+                db.delete(target_event)
+                db.commit()
+
+            # If generic "cancel" or "remove last", delete latest task
+            if not deleted_title and (tasks_today or events_today):
+                last_task = tasks_today[-1] if tasks_today else None
+                if last_task:
+                    deleted_title = last_task.title
+                    db.delete(last_task)
+                    db.commit()
+
+            if deleted_title:
+                return {
+                    "status": "success",
+                    "action_label": "CANCELLED",
+                    "transcript": transcript[:40],
+                    "starter_task": f"Removed: {deleted_title}"[:24],
+                    "feasibility": None
+                }
+            else:
+                return {
+                    "status": "warning",
+                    "action_label": "NOT FOUND",
+                    "transcript": transcript[:40],
+                    "starter_task": "No matching item found",
+                    "feasibility": None
+                }
 
         # 1. Check if voice audio specifies an explicit meeting / appointment
         parsed_event = EventParserService.parse_event_from_text(transcript)
