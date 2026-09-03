@@ -166,15 +166,29 @@ async def google_calendar_callback(
     # Sync events for upcoming 7 days
     synced_count = await CalendarService.sync_google_events(db, user_id, access_token, days=7)
 
+    refresh_token = tokens.get("refresh_token", "")
+    token_box_html = ""
+    if refresh_token:
+        token_box_html = f"""
+        <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 14px; margin: 18px 0; text-align: left;">
+            <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; color: #1e293b;">🔑 Permanent Auto-Connect Token:</p>
+            <textarea readonly onclick="this.select()" style="width: 100%; height: 50px; font-size: 11px; font-family: monospace; color: #0f172a; background: #fff; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; resize: none;">{refresh_token}</textarea>
+            <p style="margin: 6px 0 0 0; font-size: 11px; color: #64748b;">(Optional) Copy this and add it as Render Environment Variable <code>GOOGLE_REFRESH_TOKEN</code> to ensure Google Calendar auto-connects permanently on every future server reboot without clicking anything.</p>
+        </div>
+        """
+
     return HTMLResponse(f"""
     <html>
         <head><title>Google Calendar Connected</title></head>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 40px;">
-            <div style="max-width: 500px; margin: auto; padding: 30px; border-radius: 12px; border: 1px solid #e0e0e0; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                <h2 style="color: #10B981; margin-top: 0;">Google Calendar Connected!</h2>
-                <p>Successfully synced <strong>{synced_count}</strong> upcoming events into CoachPilot AI.</p>
-                <p style="color: #666; font-size: 14px;">Your Waveshare ESP32-S3 Mini desk companion and mobile dashboard now reflect your live calendar density.</p>
-                <a href="/" style="display: inline-block; margin-top: 15px; padding: 10px 20px; background: #2563EB; color: #fff; text-decoration: none; border-radius: 8px;">Go to Dashboard</a>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 40px; background: #f1f5f9;">
+            <div style="max-width: 520px; margin: auto; padding: 30px; background: #fff; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px rgba(0,0,0,0.06);">
+                <div style="width: 50px; height: 50px; background: #ecfdf5; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;">
+                    <span style="font-size: 24px; color: #10b981;">✓</span>
+                </div>
+                <h2 style="color: #0f172a; margin: 0 0 8px;">Google Calendar Connected!</h2>
+                <p style="color: #475569; font-size: 14px; margin: 0 0 16px;">Successfully imported <strong>{synced_count}</strong> upcoming events into your CoachPilot schedule and ESP32 display.</p>
+                {token_box_html}
+                <a href="/" style="display: inline-block; margin-top: 10px; padding: 12px 24px; background: #2563EB; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open Dashboard</a>
             </div>
         </body>
     </html>

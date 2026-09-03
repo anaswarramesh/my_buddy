@@ -340,9 +340,29 @@
             fetchDailySynthesis(currentSelectedDate);
             fetchDensityForecast();
             fetchIdeas();
-            // Automatically sync latest updates from Google Calendar
-            syncGoogleCalendar(true);
+            checkGoogleStatus();
         });
+
+        async function checkGoogleStatus() {
+            try {
+                const res = await fetch('/api/calendar/google/status');
+                const data = await res.json();
+                const btn = document.getElementById('syncGoogleBtn');
+                const text = document.getElementById('syncGoogleText');
+                if (!data.connected) {
+                    btn.className = "px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg flex items-center space-x-1.5 transition shadow animate-pulse";
+                    btn.onclick = () => { window.location.href = '/api/calendar/google/login'; };
+                    text.innerText = "Connect Google Calendar";
+                } else {
+                    btn.className = "px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded-lg flex items-center space-x-1.5 transition shadow";
+                    btn.onclick = () => syncGoogleCalendar(false);
+                    text.innerText = "Sync Google";
+                    syncGoogleCalendar(true); // background silent sync
+                }
+            } catch (e) {
+                console.error("Failed to check Google status:", e);
+            }
+        }
 
         async function syncGoogleCalendar(silent = false) {
             const icon = document.getElementById('syncGoogleIcon');
@@ -359,12 +379,15 @@
                         text.innerText = 'Synced!';
                         setTimeout(() => { if (text) text.innerText = 'Sync Google'; }, 2000);
                     }
-                } else if (!silent) {
+                } else {
                     const err = await res.json();
-                    if (confirm("Google Calendar needs to be connected. Connect now?")) {
-                        window.location.href = '/api/calendar/google/login';
+                    if (!silent) {
+                        if (confirm("Google Calendar needs to be connected. Connect now?")) {
+                            window.location.href = '/api/calendar/google/login';
+                        }
+                    } else {
+                        checkGoogleStatus();
                     }
-                    if (text) text.innerText = 'Sync Google';
                 }
             } catch (e) {
                 console.error("Google Calendar sync error:", e);
