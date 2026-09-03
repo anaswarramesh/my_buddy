@@ -55,11 +55,20 @@ def update_event(event_id: str, payload: CalendarEventUpdate, db: Session = Depe
     return ev
 
 @router.delete("/events/{event_id}")
-def delete_event(event_id: str, db: Session = Depends(get_db)):
+async def delete_event(event_id: str, db: Session = Depends(get_db)):
     ev = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
     if not ev:
         raise HTTPException(status_code=404, detail="Calendar event not found")
     
+    # If this event was synced from Google Calendar, delete from Google Calendar too!
+    if ev.external_event_id:
+        try:
+            token = await CalendarService.get_valid_google_token(db, ev.user_id)
+            if token:
+                await CalendarService.delete_google_event(token, ev.external_event_id)
+        except Exception as e:
+            print(f"[Google Delete] Error deleting from Google Calendar: {e}")
+
     db.delete(ev)
     db.commit()
     return {"status": "deleted", "id": event_id}

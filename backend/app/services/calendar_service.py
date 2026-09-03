@@ -453,3 +453,20 @@ class CalendarService:
             resp = await client.post(url, headers=headers, json=body)
             return resp.json()
 
+    @staticmethod
+    async def delete_google_event(access_token: str, external_event_id: str) -> bool:
+        """
+        Deletes an event directly from user's primary Google Calendar.
+        """
+        import httpx
+        url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{external_event_id}"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.delete(url, headers=headers)
+                print(f"[Google Calendar] Deleted event {external_event_id}, status: {resp.status_code}")
+                return resp.status_code in [200, 204, 404, 410]
+        except Exception as e:
+            print(f"[Google Calendar] Delete event failed: {e}")
+            return False
+
