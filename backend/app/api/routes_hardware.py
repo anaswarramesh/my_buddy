@@ -326,19 +326,24 @@ async def handle_hardware_voice_upload(
             db.add(task_db)
             db.commit()
 
-            # Sync to Google Calendar if connected
+            # Sync to Google Calendar in background without blocking ESP32 response
             google_token = await CalendarService.get_valid_google_token(db, user.id)
             if google_token:
-                try:
-                    await CalendarService.create_google_event(
-                        access_token=google_token,
-                        title=cal_event.title,
-                        start_time=cal_event.start_time,
-                        end_time=cal_event.end_time,
-                        description="Scheduled via CoachPilot ESP32 Voice"
-                    )
-                except Exception as e:
-                    print(f"[Google Calendar] Hardware voice sync failed: {e}")
+                async def _bg_create_google_event(tok, tit, st, et):
+                    try:
+                        await CalendarService.create_google_event(
+                            access_token=tok,
+                            title=tit,
+                            start_time=st,
+                            end_time=et,
+                            description="Scheduled via CoachPilot ESP32 Voice"
+                        )
+                        print(f"[Google Calendar] Voice event synced to Google in background: {tit}")
+                    except Exception as ge:
+                        print(f"[Google Calendar] Background voice sync failed: {ge}")
+
+                import asyncio
+                asyncio.create_task(_bg_create_google_event(google_token, cal_event.title, cal_event.start_time, cal_event.end_time))
 
             time_str = cal_event.start_time.strftime("%H:%M")
             return {

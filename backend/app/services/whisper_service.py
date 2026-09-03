@@ -25,9 +25,9 @@ class WhisperService:
                 import httpx
                 encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
                 models_to_try = [
-                    "gemini-flash-latest",
                     "gemini-flash-lite-latest",
                     "gemini-2.5-flash-lite",
+                    "gemini-flash-latest",
                     "gemini-pro-latest",
                     "gemini-3.6-flash"
                 ]
@@ -50,7 +50,7 @@ class WhisperService:
                     ]
                 }
 
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=6.0) as client:
                     for model_name in models_to_try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.gemini_api_key}"
                         try:
