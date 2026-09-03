@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from app.database import get_db
 from app.models.calendar import CalendarEvent
+from app.models.task import Task
 from app.schemas.calendar import CalendarEventResponse, CalendarEventCreate, CalendarEventUpdate, CalendarSyncResponse
 from app.schemas.density import DailyDensityResponse, MultiDayDensityResponse
 from app.services.calendar_service import CalendarService
@@ -102,7 +103,24 @@ def get_density_overview(
     for offset in range(days):
         cur_date = today + timedelta(days=offset)
         events = CalendarService.get_events_for_range(db, user_id, cur_date, cur_date)
-        d_res = DensityService.calculate_day_density(cur_date, events)
+        start_dt = datetime.combine(cur_date, time(0, 0, 0))
+        end_dt = datetime.combine(cur_date, time(23, 59, 59))
+        tasks_for_date = db.query(Task).filter(
+            Task.user_id == user_id,
+            Task.is_scheduled == True,
+            Task.scheduled_start >= start_dt,
+            Task.scheduled_start <= end_dt
+        ).all()
+        density_events = list(events)
+        for t in tasks_for_date:
+            if t.scheduled_start and t.scheduled_end:
+                density_events.append({
+                    "start_time": t.scheduled_start,
+                    "end_time": t.scheduled_end,
+                    "cognitive_weight": 1.0,
+                    "is_all_day": False
+                })
+        d_res = DensityService.calculate_day_density(cur_date, density_events)
         snapshots.append(d_res)
         if d_res.density_level == "light":
             green_days.append(cur_date)

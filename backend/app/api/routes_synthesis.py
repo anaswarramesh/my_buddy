@@ -27,18 +27,29 @@ def get_daily_synthesis(
     today = date.today()
     selected_date = target_date or today
     events = CalendarService.get_events_for_range(db, user_id, selected_date, selected_date)
-    density_res = DensityService.calculate_day_density(selected_date, events)
 
-    # If today: include active pending & scheduled starter tasks
-    # If another date: filter tasks scheduled on that specific date
     start_dt = datetime.combine(selected_date, time(0, 0, 0))
     end_dt = datetime.combine(selected_date, time(23, 59, 59))
 
     scheduled_for_date = db.query(Task).filter(
         Task.user_id == user_id,
+        Task.is_scheduled == True,
         Task.scheduled_start >= start_dt,
         Task.scheduled_start <= end_dt
     ).all()
+
+    # Merge calendar events and scheduled tasks for exact cognitive density
+    density_events = list(events)
+    for t in scheduled_for_date:
+        if t.scheduled_start and t.scheduled_end:
+            density_events.append({
+                "start_time": t.scheduled_start,
+                "end_time": t.scheduled_end,
+                "cognitive_weight": 1.0,
+                "is_all_day": False
+            })
+
+    density_res = DensityService.calculate_day_density(selected_date, density_events)
 
     # If tasks are specifically scheduled for this date, show them
     if scheduled_for_date:
