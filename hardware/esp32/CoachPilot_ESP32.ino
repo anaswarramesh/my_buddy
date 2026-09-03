@@ -252,7 +252,7 @@ void loop() {
                         Serial.print(recordedBytes);
                         Serial.println(F(" audio bytes"));
 
-                        if (recordedBytes > 4000) { // At least 0.12s of valid audio
+                        if (recordedBytes > 25000 && durationMs >= 800) { // At least 0.8s of intentional speech
                             currentState = STATE_UPLOADING;
                             drawUploadingScreen();
                             // Trigger background upload on Core 0 without freezing UI!
@@ -260,7 +260,7 @@ void loop() {
                                 xTaskNotifyGive(uploadTaskHandle);
                             }
                         } else {
-                            Serial.println(F("[BUTTON] Audio too short (<0.12s), returning to idle"));
+                            Serial.println(F("[BUTTON] Tap too short (<0.8s), ignoring"));
                             currentState = STATE_IDLE;
                             drawDashboard();
                         }

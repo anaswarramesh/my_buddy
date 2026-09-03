@@ -43,7 +43,7 @@ class WhisperService:
                                     }
                                 },
                                 {
-                                    "text": "Transcribe the spoken audio verbatim into English text. Return ONLY the transcribed words without any quotes, introductory phrases, or explanations. If no clear speech is detected, return an empty string."
+                                    "text": "Transcribe the spoken audio verbatim into English text. CRITICAL: If the audio is silence, room background noise, breathing, static, button clicking, or if no clear intelligible human speech is present, return ONLY the word 'SILENCE'. Do NOT hallucinate or invent words from noise."
                                 }
                             ]
                         }
@@ -62,6 +62,9 @@ class WhisperService:
                                     parts = candidates[0].get("content", {}).get("parts", [])
                                     if parts:
                                         text = parts[0].get("text", "").strip()
+                                        if text.upper().strip(". ") in ["SILENCE", "NO SPEECH", "BACKGROUND NOISE", ""]:
+                                            print(f"[WhisperService] {model_name} detected silence/noise.")
+                                            return ""
                                         if text:
                                             print(f"[WhisperService] {model_name} transcribed: '{text}'")
                                             return text

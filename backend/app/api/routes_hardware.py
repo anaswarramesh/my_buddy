@@ -228,28 +228,31 @@ async def handle_hardware_voice_upload(
         except Exception as e:
             print(f"[Hardware] Could not save debug audio: {e}")
 
-        # Check peak amplitude to detect silence / disconnected mic
+        # Check peak amplitude and duration to detect silence or accidental button taps
         max_amp = 0
         data_offset = 44 if body.startswith(b"RIFF") else 0
         raw_pcm = body[data_offset:]
+        duration_secs = len(raw_pcm) / (16000 * 2) if len(raw_pcm) > 0 else 0
         if len(raw_pcm) >= 2:
             sample_count = len(raw_pcm) // 2
             samples = struct.unpack(f"<{sample_count}h", raw_pcm[:sample_count*2])
             max_amp = max(abs(s) for s in samples) if samples else 0
-        print(f"[Hardware] Voice upload received: {len(body)} bytes, Peak Amp: {max_amp}")
+        print(f"[Hardware] Voice upload received: {len(body)} bytes ({duration_secs:.2f}s), Peak Amp: {max_amp}")
+
+        # Reject accidental taps (<0.8s) or near-silence (<350 peak amplitude)
+        if duration_secs < 0.8 or max_amp < 350:
+            print(f"[Hardware] Rejected silence/tap: {duration_secs:.2f}s, Peak: {max_amp}")
+            return {
+                "status": "warning",
+                "action_label": "NO SPEECH",
+                "transcript": "No speech detected (hold button & speak)",
+                "starter_task": "Hold button & speak",
+                "feasibility": None
+            }
 
         # Transcribe via Whisper / Gemini
         transcript = await WhisperService.transcribe_audio(audio_bytes=body)
         if not transcript or not transcript.strip():
-            if max_amp < 150:
-                # Microphone is picking up near pure silence
-                return {
-                    "status": "warning",
-                    "action_label": "MIC SILENT",
-                    "transcript": "No sound detected (check INMP441 wiring)",
-                    "starter_task": "Check Mic Pins/Gain",
-                    "feasibility": None
-                }
             return {
                 "status": "warning",
                 "action_label": "VOICE UNCLEAR",
