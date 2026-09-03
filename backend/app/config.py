@@ -37,6 +37,7 @@ class Settings(BaseModel):
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
     google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     google_redirect_uri: str = os.getenv("GOOGLE_REDIRECT_URI", "")
+    google_refresh_token: str = os.getenv("GOOGLE_REFRESH_TOKEN", "")
     base_url: str = os.getenv("BASE_URL", "http://localhost:8000")
 
 settings = Settings()

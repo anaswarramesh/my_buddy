@@ -24,11 +24,33 @@ from app.services.event_parser import EventParserService
 router = APIRouter(prefix="/api/hardware", tags=["Hardware IoT Display & Voice"])
 
 @router.get("/display-data")
-def get_hardware_display_data(user_id: str = "default-user", db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_hardware_display_data(user_id: str = "default-user", db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Compact JSON payload optimized for 0.96" / 1.3" 128x64 OLED displays on ESP32 & Raspberry Pi.
     Merges both calendar events and voice-scheduled tasks into the OLED timeline and load calculation.
+    Automatically background-syncs with Google Calendar if connected.
     """
+    # Auto-sync Google Calendar in background if linked and not synced in last 3 minutes
+    try:
+        from app.models.oauth import OAuthCredential
+        cred = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google"
+        ).first()
+        should_sync = False
+        if not cred or not cred.last_synced_at:
+            should_sync = True
+        elif cred.last_synced_at < datetime.utcnow() - timedelta(minutes=3):
+            should_sync = True
+
+        if should_sync:
+            token = await CalendarService.get_valid_google_token(db, user_id)
+            if token:
+                print(f"[Hardware Auto-Sync] Automatically syncing Google Calendar for {user_id}...")
+                await CalendarService.sync_google_events(db, user_id, token, days=7)
+    except Exception as sync_err:
+        print(f"[Hardware Auto-Sync] Sync check failed: {sync_err}")
+
     today = date.today()
     start_of_day = datetime.combine(today, time(0, 0, 0))
     end_of_day = datetime.combine(today, time(23, 59, 59))

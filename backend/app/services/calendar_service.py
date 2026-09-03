@@ -196,21 +196,83 @@ class CalendarService:
 
         db.commit()
         db.refresh(cred)
+
+        # Persist a backup to disk so server restarts don't lose the token
+        try:
+            import json
+            backup_data = {
+                "user_id": user_id,
+                "provider": provider,
+                "access_token": access_token,
+                "refresh_token": cred.refresh_token,
+                "expires_at": expires_at.isoformat()
+            }
+            with open("/tmp/google_oauth_backup.json", "w") as f:
+                json.dump(backup_data, f)
+            if cred.refresh_token:
+                print(f"[Google OAuth] To persist across all future cloud redeploys, set Render Env Var GOOGLE_REFRESH_TOKEN={cred.refresh_token}")
+        except Exception as e:
+            print(f"[Google OAuth] Could not save backup file: {e}")
+
         return cred
 
     @staticmethod
     async def get_valid_google_token(db: Session, user_id: str) -> Optional[str]:
         """
         Retrieves a valid access token for the user, refreshing it if expired.
+        Automatically restores credentials from backup file or GOOGLE_REFRESH_TOKEN env var if database was wiped.
         """
         from app.models.oauth import OAuthCredential
         from app.config import settings
         import httpx
+        import os
+        import json
 
         cred = db.query(OAuthCredential).filter(
             OAuthCredential.user_id == user_id,
             OAuthCredential.provider == "google"
         ).first()
+
+        # If not in DB, check local backup file or GOOGLE_REFRESH_TOKEN
+        if not cred:
+            rf_token = None
+            if os.path.exists("/tmp/google_oauth_backup.json"):
+                try:
+                    with open("/tmp/google_oauth_backup.json", "r") as f:
+                        bdata = json.load(f)
+                        rf_token = bdata.get("refresh_token")
+                except Exception:
+                    pass
+            if not rf_token and settings.google_refresh_token:
+                rf_token = settings.google_refresh_token
+
+            if rf_token and settings.google_client_id and settings.google_client_secret:
+                try:
+                    url = "https://oauth2.googleapis.com/token"
+                    data = {
+                        "client_id": settings.google_client_id,
+                        "client_secret": settings.google_client_secret,
+                        "refresh_token": rf_token,
+                        "grant_type": "refresh_token"
+                    }
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(url, data=data)
+                        if resp.status_code == 200:
+                            tok_data = resp.json()
+                            cred = OAuthCredential(
+                                user_id=user_id,
+                                provider="google",
+                                access_token=tok_data.get("access_token"),
+                                refresh_token=rf_token,
+                                expires_at=datetime.utcnow() + timedelta(seconds=int(tok_data.get("expires_in", 3600))),
+                                last_synced_at=datetime.utcnow()
+                            )
+                            db.add(cred)
+                            db.commit()
+                            db.refresh(cred)
+                            print(f"[Google OAuth] Restored credentials from refresh token for {user_id}!")
+                except Exception as e:
+                    print(f"[Google OAuth] Auto-restore from refresh token failed: {e}")
 
         if not cred or not cred.access_token:
             return None

@@ -16,12 +16,35 @@ from app.api.routes_synthesis import router as synthesis_router
 from app.api.routes_nlp import router as nlp_router
 from app.api.routes_hardware import router as hardware_router
 
+import asyncio
+
 # Initialize Tables
 Base.metadata.create_all(bind=engine)
 
+async def background_google_sync_worker():
+    """
+    Background worker that runs continuously and syncs Google Calendar events
+    every 5 minutes without needing any manual user intervention.
+    """
+    while True:
+        try:
+            await asyncio.sleep(300) # Wait 5 minutes between syncs
+            db = SessionLocal()
+            try:
+                token = await CalendarService.get_valid_google_token(db, "default-user")
+                if token:
+                    print("[Background Worker] Auto-syncing Google Calendar in background...")
+                    await CalendarService.sync_google_events(db, "default-user", token, days=7)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[Background Worker] Google Calendar sync loop error: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Seed default user and demo calendar
+    # Seed default user and auto-sync on startup
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == "default-user").first()
@@ -36,9 +59,22 @@ async def lifespan(app: FastAPI):
             db.add(user)
             db.commit()
             print("[Startup] Initialized default user Alex Builder.")
+        
+        # Initial Google Calendar auto-sync on startup / restart
+        try:
+            token = await CalendarService.get_valid_google_token(db, "default-user")
+            if token:
+                print("[Startup] Auto-syncing Google Calendar on restart...")
+                await CalendarService.sync_google_events(db, "default-user", token, days=7)
+        except Exception as e:
+            print(f"[Startup] Initial Google sync: {e}")
     finally:
         db.close()
+
+    # Launch background worker
+    sync_task = asyncio.create_task(background_google_sync_worker())
     yield
+    sync_task.cancel()
 
 app = FastAPI(
     title="CoachPilot AI - Daily Productivity & Coaching Assistant",
