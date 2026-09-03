@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Request, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Dict, Any, List, Optional
 import io
 import os
@@ -27,10 +27,21 @@ router = APIRouter(prefix="/api/hardware", tags=["Hardware IoT Display & Voice"]
 def get_hardware_display_data(user_id: str = "default-user", db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Compact JSON payload optimized for 0.96" / 1.3" 128x64 OLED displays on ESP32 & Raspberry Pi.
+    Merges both calendar events and voice-scheduled tasks into the OLED timeline and load calculation.
     """
     today = date.today()
+    start_of_day = datetime.combine(today, time(0, 0, 0))
+    end_of_day = datetime.combine(today, time(23, 59, 59))
+
     events = CalendarService.get_events_for_range(db, user_id, today, today)
-    density_res = DensityService.calculate_day_density(today, events)
+    
+    # Fetch scheduled tasks for today
+    scheduled_tasks = db.query(Task).filter(
+        Task.user_id == user_id,
+        Task.is_scheduled == True,
+        Task.scheduled_start >= start_of_day,
+        Task.scheduled_start <= end_of_day
+    ).all()
 
     # Get priority starter tasks and pending tasks
     starter_task = db.query(Task).filter(
@@ -42,43 +53,80 @@ def get_hardware_display_data(user_id: str = "default-user", db: Session = Depen
     pending_tasks = db.query(Task).filter(
         Task.user_id == user_id,
         Task.status.in_(["pending", "scheduled"])
-    ).limit(3).all()
+    ).limit(4).all()
 
-    # Short OLED-friendly nudge (compact character length)
-    if density_res.density_level in ["dense", "overloaded"]:
+    # Calculate combined committed minutes
+    event_mins = sum(int((e.end_time - e.start_time).total_seconds() / 60) for e in events)
+    task_mins = sum(t.estimated_minutes for t in scheduled_tasks)
+    total_committed = event_mins + task_mins
+    
+    # Work day = 540 minutes (9 hours)
+    density_pct = min(100, int((total_committed / 540.0) * 100))
+    if density_pct >= 75:
+        density_level = "HEAVY"
         short_nudge = "HEAVY DAY: Protect focus"
-    elif density_res.density_level == "light":
-        short_nudge = "GREEN DAY: Launch ideas!"
-    else:
+    elif density_pct >= 40:
+        density_level = "MODERATE"
         short_nudge = "BALANCED: 90m Focus slot"
+    elif density_pct > 0:
+        density_level = "LIGHT"
+        short_nudge = "GREEN DAY: Focus on tasks"
+    else:
+        density_level = "CLEAR"
+        short_nudge = "CLEAR DAY: Speak new tasks"
+
+    # Merge calendar events and scheduled tasks into a unified timeline
+    timeline_items = []
+    for ev in events:
+        clean_title = ev.title.replace("⚡", "").replace("🎙️", "").strip()
+        timeline_items.append({
+            "time": ev.start_time.strftime("%H:%M"),
+            "start_dt": ev.start_time,
+            "title": clean_title[:14]
+        })
+    for t in scheduled_tasks:
+        time_str = t.scheduled_start.strftime("%H:%M") if t.scheduled_start else "Task"
+        clean_title = t.title.replace("⚡", "").replace("🎙️", "").strip()
+        # Avoid duplicate if an event and task have same title
+        if not any(item["title"] == clean_title[:14] for item in timeline_items):
+            timeline_items.append({
+                "time": time_str,
+                "start_dt": t.scheduled_start or start_of_day,
+                "title": clean_title[:14]
+            })
+
+    # If fewer than 3 items, show pending tasks as TODO
+    if len(timeline_items) < 3:
+        for t in pending_tasks:
+            clean_title = t.title.replace("⚡", "").replace("🎙️", "").strip()
+            if not any(item["title"] == clean_title[:14] for item in timeline_items):
+                timeline_items.append({
+                    "time": "TODO",
+                    "start_dt": end_of_day,
+                    "title": clean_title[:14]
+                })
+
+    timeline_items.sort(key=lambda x: x["start_dt"])
+    events_list = [{"time": item["time"], "title": item["title"]} for item in timeline_items[:4]]
 
     tasks_list = []
     for t in pending_tasks:
         tasks_list.append({
             "id": t.id,
-            "title": t.title[:24], # Truncated for 128px screen
+            "title": t.title[:24],
             "mins": t.estimated_minutes,
             "is_starter": t.is_starter_step,
             "is_scheduled": t.is_scheduled
         })
 
-    events_list = []
-    sorted_events = sorted(events, key=lambda e: e.start_time)
-    for ev in sorted_events[:4]:
-        clean_title = ev.title.replace("⚡", "").replace("🎙️", "").strip()
-        events_list.append({
-            "time": ev.start_time.strftime("%H:%M"),
-            "title": clean_title[:14] # concise for 128px OLED screen
-        })
-
     return {
         "date_str": today.strftime("%a %b %d"),
-        "density_pct": int(density_res.density_score * 100),
-        "density_level": density_res.density_level.upper(),
-        "meeting_count": density_res.meeting_count,
+        "density_pct": density_pct,
+        "density_level": density_level,
+        "meeting_count": len(events) + len(scheduled_tasks),
         "short_nudge": short_nudge,
-        "starter_task_title": starter_task.title[:24] if starter_task else "No pending tasks",
-        "starter_task_mins": starter_task.estimated_minutes if starter_task else 0,
+        "starter_task_title": starter_task.title[:24] if starter_task else (pending_tasks[0].title[:24] if pending_tasks else "No pending tasks"),
+        "starter_task_mins": starter_task.estimated_minutes if starter_task else (pending_tasks[0].estimated_minutes if pending_tasks else 0),
         "events": events_list,
         "tasks": tasks_list
     }
