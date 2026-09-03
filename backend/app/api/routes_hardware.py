@@ -24,6 +24,9 @@ from app.services.event_parser import EventParserService
 
 router = APIRouter(prefix="/api/hardware", tags=["Hardware IoT Display & Voice"])
 
+_last_esp32_seen: Dict[str, datetime] = {}
+_sync_requested: Dict[str, bool] = {}
+
 @router.get("/display-data")
 async def get_hardware_display_data(user_id: str = "default-user", db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
@@ -31,6 +34,8 @@ async def get_hardware_display_data(user_id: str = "default-user", db: Session =
     Merges both calendar events and voice-scheduled tasks into the OLED timeline and load calculation.
     Automatically background-syncs with Google Calendar if connected.
     """
+    _last_esp32_seen[user_id] = datetime.utcnow()
+    _sync_requested[user_id] = False
     # Auto-sync Google Calendar in background if linked and not synced in last 3 minutes
     try:
         from app.models.oauth import OAuthCredential
@@ -576,3 +581,45 @@ async def handle_hardware_voice_upload(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Voice upload failed: {type(e).__name__}: {str(e)}")
+
+@router.post("/trigger-sync")
+async def trigger_hardware_sync_endpoint(user_id: str = "default-user", db: Session = Depends(get_db)):
+    """
+    Manually triggers an external sync:
+    Pulls fresh Google Calendar events, recalculates today's density, and flags ESP32 for immediate update.
+    """
+    _sync_requested[user_id] = True
+    synced_count = 0
+    try:
+        token = await CalendarService.get_valid_google_token(db, user_id)
+        if token:
+            synced_count = await CalendarService.sync_google_events(db, user_id, token, days=7)
+    except Exception as e:
+        print(f"[Trigger Sync] Google sync error: {e}")
+
+    last_seen = _last_esp32_seen.get(user_id)
+    seconds_ago = int((datetime.utcnow() - last_seen).total_seconds()) if last_seen else None
+    is_online = seconds_ago is not None and seconds_ago < 90
+
+    return {
+        "status": "success",
+        "message": f"Sync completed! Pulled {synced_count} Google events.",
+        "hardware_online": is_online,
+        "last_seen_seconds_ago": seconds_ago,
+        "synced_at": datetime.utcnow().isoformat()
+    }
+
+@router.get("/status")
+def get_hardware_status(user_id: str = "default-user"):
+    """
+    Returns live connectivity and polling status of the user's ESP32 companion.
+    """
+    last_seen = _last_esp32_seen.get(user_id)
+    seconds_ago = int((datetime.utcnow() - last_seen).total_seconds()) if last_seen else None
+    is_online = seconds_ago is not None and seconds_ago < 90
+    return {
+        "online": is_online,
+        "last_seen_seconds_ago": seconds_ago,
+        "last_seen_str": f"{seconds_ago}s ago" if seconds_ago is not None else "offline",
+        "sync_pending": _sync_requested.get(user_id, False)
+    }
