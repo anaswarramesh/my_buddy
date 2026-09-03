@@ -34,20 +34,24 @@ def get_daily_synthesis(
     scheduled_for_date = db.query(Task).filter(
         Task.user_id == user_id,
         Task.is_scheduled == True,
+        Task.status.in_(["pending", "scheduled"]),
         Task.scheduled_start >= start_dt,
         Task.scheduled_start <= end_dt
     ).all()
 
-    # Merge calendar events and scheduled tasks for exact cognitive density
+    # Merge calendar events and scheduled tasks for exact cognitive density (deduplicating tasks with events)
     density_events = list(events)
+    existing_event_titles = {e.title.lower().replace("⚡", "").strip() for e in events}
     for t in scheduled_for_date:
         if t.scheduled_start and t.scheduled_end:
-            density_events.append({
-                "start_time": t.scheduled_start,
-                "end_time": t.scheduled_end,
-                "cognitive_weight": 1.0,
-                "is_all_day": False
-            })
+            clean_t_title = t.title.lower().replace("⚡", "").strip()
+            if clean_t_title not in existing_event_titles:
+                density_events.append({
+                    "start_time": t.scheduled_start,
+                    "end_time": t.scheduled_end,
+                    "cognitive_weight": 1.0,
+                    "is_all_day": False
+                })
 
     density_res = DensityService.calculate_day_density(selected_date, density_events)
 

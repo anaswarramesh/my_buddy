@@ -70,6 +70,15 @@ async def delete_event(event_id: str, db: Session = Depends(get_db)):
         except Exception as e:
             print(f"[Google Delete] Error deleting from Google Calendar: {e}")
 
+    # Also delete or un-schedule any corresponding task
+    clean_title = ev.title.replace("⚡", "").strip()
+    matching_tasks = db.query(Task).filter(
+        Task.user_id == ev.user_id,
+        (Task.title == clean_title) | (Task.title == ev.title)
+    ).all()
+    for mt in matching_tasks:
+        db.delete(mt)
+
     db.delete(ev)
     db.commit()
     return {"status": "deleted", "id": event_id}
@@ -108,18 +117,22 @@ def get_density_overview(
         tasks_for_date = db.query(Task).filter(
             Task.user_id == user_id,
             Task.is_scheduled == True,
+            Task.status.in_(["pending", "scheduled"]),
             Task.scheduled_start >= start_dt,
             Task.scheduled_start <= end_dt
         ).all()
         density_events = list(events)
+        existing_event_titles = {e.title.lower().replace("⚡", "").strip() for e in events}
         for t in tasks_for_date:
             if t.scheduled_start and t.scheduled_end:
-                density_events.append({
-                    "start_time": t.scheduled_start,
-                    "end_time": t.scheduled_end,
-                    "cognitive_weight": 1.0,
-                    "is_all_day": False
-                })
+                clean_t_title = t.title.lower().replace("⚡", "").strip()
+                if clean_t_title not in existing_event_titles:
+                    density_events.append({
+                        "start_time": t.scheduled_start,
+                        "end_time": t.scheduled_end,
+                        "cognitive_weight": 1.0,
+                        "is_all_day": False
+                    })
         d_res = DensityService.calculate_day_density(cur_date, density_events)
         snapshots.append(d_res)
         if d_res.density_level == "light":

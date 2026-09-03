@@ -58,10 +58,11 @@ async def get_hardware_display_data(user_id: str = "default-user", db: Session =
 
     events = CalendarService.get_events_for_range(db, user_id, today, today)
     
-    # Fetch scheduled tasks for today
+    # Fetch scheduled tasks for today (active only)
     scheduled_tasks = db.query(Task).filter(
         Task.user_id == user_id,
         Task.is_scheduled == True,
+        Task.status.in_(["pending", "scheduled"]),
         Task.scheduled_start >= start_of_day,
         Task.scheduled_start <= end_of_day
     ).all()
@@ -78,16 +79,19 @@ async def get_hardware_display_data(user_id: str = "default-user", db: Session =
         Task.status.in_(["pending", "scheduled"])
     ).limit(4).all()
 
-    # Calculate density using the exact same DensityService as Web UI (including switch penalties)
+    # Calculate density using the exact same DensityService as Web UI (deduplicating tasks with events)
     density_events = list(events)
+    existing_event_titles = {e.title.lower().replace("⚡", "").strip() for e in events}
     for t in scheduled_tasks:
         if t.scheduled_start and t.scheduled_end:
-            density_events.append({
-                "start_time": t.scheduled_start,
-                "end_time": t.scheduled_end,
-                "cognitive_weight": 1.0,
-                "is_all_day": False
-            })
+            clean_t_title = t.title.lower().replace("⚡", "").strip()
+            if clean_t_title not in existing_event_titles:
+                density_events.append({
+                    "start_time": t.scheduled_start,
+                    "end_time": t.scheduled_end,
+                    "cognitive_weight": 1.0,
+                    "is_all_day": False
+                })
     density_res = DensityService.calculate_day_density(today, density_events)
     density_pct = int(density_res.density_score * 100)
     density_level = density_res.density_level.upper()
