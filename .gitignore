@@ -40,3 +40,18 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Audio Recordings & Voice Data
+*.wav
+*.aiff
+*.mp3
+*.m4a
+*.pcm
+*.ogg
+*.flac
+
+# OAuth Tokens & Credential Backups
+*token*.json
+*oauth*.json
+*backup*.json
+

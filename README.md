@@ -394,7 +394,7 @@ $$D(d) = \min\left(1.0, \frac{\sum_{i=1}^{N} (T_{i} \times W_{i}) + (N \times C_
 Deploy the backend to **Render.com** (or Fly.io / Railway) for free in 3 minutes so your ESP32 companion works 24/7 independently:
 
 1. Log in to [Render.com](https://render.com/) and click **New + $\rightarrow$ Web Service**.
-2. Connect your GitHub repository (`anaswarramesh/my_buddy`).
+2. Connect your GitHub repository (`your-username/my_buddy`).
 3. Configure:
    - **Environment:** `Python`
    - **Root Directory:** `backend` *(⚠️ Important: sets the working folder to backend)*

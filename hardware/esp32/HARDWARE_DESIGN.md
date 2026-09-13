@@ -165,7 +165,7 @@ Deploying the FastAPI backend to the cloud ensures your Waveshare ESP32-S3 Mini 
 ### Deploy to Render.com in 3 Minutes:
 1. Push this repository to **GitHub**.
 2. Log in to [Render.com](https://render.com/) and click **New + $\rightarrow$ Web Service**.
-3. Select your repository (`anaswarramesh/my_buddy`).
+3. Select your repository (`your-username/my_buddy`).
 4. Set the following:
    - **Environment:** `Python`
    - **Root Directory:** `backend` *(⚠️ Sets working directory to backend)*

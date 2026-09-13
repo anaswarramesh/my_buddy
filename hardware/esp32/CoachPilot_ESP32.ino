@@ -24,8 +24,8 @@
 const char* WIFI_SSID = "YOUR_WIFI_SSID";          // <-- Enter your WiFi name
 const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";      // <-- Enter your WiFi password
 
-// Server URL: Your live 24/7 Render Cloud backend
-const char* SERVER_BASE = "https://my-buddy-81bd.onrender.com";
+// Server URL: Your live 24/7 Render Cloud backend (or local IP e.g. http://192.168.1.100:8000)
+const char* SERVER_BASE = "https://your-backend-app.onrender.com";
 
 // ================= PIN DEFINITIONS =================
 #define PIN_BUTTON      6   // Push-to-Talk Button (GPIO 6 to GND)
